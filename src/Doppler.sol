@@ -66,6 +66,21 @@ struct Position {
     uint8 salt;
 }
 
+/// @dev Local variables container used in `_rebalance` to avoid stack depth limitations
+struct RebalanceVars {
+    uint256 currentEpoch;
+    uint256 epochsPassed;
+    uint256 totalTokensSold_;
+    Position upperSlugPosition;
+    PoolId poolId;
+    uint160 sqrtPriceX96;
+    int24 currentTick;
+    int256 accumulatorDelta;
+    int24 adjustmentTick;
+    uint256 numeraireAvailable;
+    uint256 assetAvailable;
+}
+
 /// @notice Thrown when providing zero address where not allowed
 error ZeroAddress();
 
@@ -657,41 +672,41 @@ contract Doppler is BaseHook {
     function _rebalance(
         PoolKey calldata key
     ) internal {
-        // We increment by 1 to 1-index the epoch
-        uint256 currentEpoch = _getCurrentEpoch();
-        uint256 epochsPassed = currentEpoch - uint256(state.lastEpoch);
+        RebalanceVars memory v;
 
-        state.lastEpoch = uint40(currentEpoch);
+        // We increment by 1 to 1-index the epoch
+        v.currentEpoch = _getCurrentEpoch();
+        v.epochsPassed = v.currentEpoch - uint256(state.lastEpoch);
+
+        state.lastEpoch = uint40(v.currentEpoch);
 
         // Cache state var to avoid multiple SLOADs
-        uint256 totalTokensSold_ = state.totalTokensSold;
+        v.totalTokensSold_ = state.totalTokensSold;
 
-        Position memory upperSlugPosition = positions[UPPER_SLUG_SALT];
+        v.upperSlugPosition = positions[UPPER_SLUG_SALT];
 
-        PoolId poolId = key.toId();
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
-        int24 currentTick = TickMath.getTickAtSqrtPrice(sqrtPriceX96); // read current tick based sqrtPrice as its more accurate in extreme edge cases
-        currentTick = _alignComputedTickWithTickSpacing(currentTick, key.tickSpacing);
+        v.poolId = key.toId();
+        (v.sqrtPriceX96,,,) = poolManager.getSlot0(v.poolId);
+        v.currentTick = TickMath.getTickAtSqrtPrice(v.sqrtPriceX96); // read current tick based sqrtPrice as its more accurate in extreme edge cases
+        v.currentTick = _alignComputedTickWithTickSpacing(v.currentTick, key.tickSpacing);
 
-        int256 accumulatorDelta;
         int256 newAccumulator;
-        int24 adjustmentTick;
         // Handle empty epochs
         // accumulatorDelta should always be nonzero if epochsPassed > 1, so we don't need the check
-        if (epochsPassed > 1) {
+        if (v.epochsPassed > 1) {
             // handle the price adjustment that should have happened in the first empty epoch
-            int256 initialNetSold = int256(totalTokensSold_) - int256(state.totalTokensSoldLastEpoch);
+            int256 initialNetSold = int256(v.totalTokensSold_) - int256(state.totalTokensSoldLastEpoch);
             bool lteExpectedSoldInFirstEpoch =
-                totalTokensSold_ <= _getExpectedAmountSoldWithEpochOffset(-int256(epochsPassed - 1));
+                v.totalTokensSold_ <= _getExpectedAmountSoldWithEpochOffset(-int256(v.epochsPassed - 1));
 
             if (initialNetSold < 0 && lteExpectedSoldInFirstEpoch) {
-                accumulatorDelta += _getMaxTickDeltaPerEpoch();
+                v.accumulatorDelta += _getMaxTickDeltaPerEpoch();
             } else if (lteExpectedSoldInFirstEpoch) {
-                accumulatorDelta += _getMaxTickDeltaPerEpoch()
+                v.accumulatorDelta += _getMaxTickDeltaPerEpoch()
                     * int256(
                         WAD
                             - FullMath.mulDiv(
-                                totalTokensSold_, WAD, _getExpectedAmountSoldWithEpochOffset(-int256(epochsPassed - 1))
+                                v.totalTokensSold_, WAD, _getExpectedAmountSoldWithEpochOffset(-int256(v.epochsPassed - 1))
                             )
                     ) / I_WAD;
             } else {
@@ -702,12 +717,12 @@ contract Doppler is BaseHook {
                 // The expectedTick is where the upperSlug.tickUpper is/would be placed in the previous epoch
                 // The upperTick is not always placed so we have to compute its placement in case it's not
                 // This depends on the invariant that upperSlug.tickLower == currentTick at the time of rebalancing
-                adjustmentTick = isToken0
-                    ? upperSlugPosition.tickLower + adjustmentTickDelta
-                    : upperSlugPosition.tickLower - adjustmentTickDelta;
-                int24 expectedTick = _alignComputedTickWithTickSpacing(adjustmentTick, key.tickSpacing);
+                v.adjustmentTick = isToken0
+                    ? v.upperSlugPosition.tickLower + adjustmentTickDelta
+                    : v.upperSlugPosition.tickLower - adjustmentTickDelta;
+                int24 expectedTick = _alignComputedTickWithTickSpacing(v.adjustmentTick, key.tickSpacing);
 
-                uint256 epochsRemaining = totalEpochs - currentEpoch;
+                uint256 epochsRemaining = totalEpochs - v.currentEpoch;
                 int24 liquidityBound = isToken0 ? tauTick + gamma : tauTick - gamma;
                 liquidityBound = epochsRemaining < numPDSlugs
                     ? positions[bytes32(uint256(NUM_DEFAULT_SLUGS + epochsRemaining))].tickUpper
@@ -717,19 +732,19 @@ contract Doppler is BaseHook {
                 // This is necessary because there is no liquidity above the curve and we need to
                 // ensure that the accumulatorDelta is just based on meaningful (in range) ticks
                 if (isToken0) {
-                    currentTick = currentTick > liquidityBound ? liquidityBound : currentTick;
+                    v.currentTick = v.currentTick > liquidityBound ? liquidityBound : v.currentTick;
                 } else {
-                    currentTick = currentTick < liquidityBound ? liquidityBound : currentTick;
+                    v.currentTick = v.currentTick < liquidityBound ? liquidityBound : v.currentTick;
                 }
 
-                accumulatorDelta += int256(currentTick - expectedTick) * I_WAD;
+                v.accumulatorDelta += int256(v.currentTick - expectedTick) * I_WAD;
             }
 
             // apply max tick delta for remaining empty epochs
             // -2 because we already applied the first empty epoch and will apply the last epoch later
             // only max DA for every epoch where we are below expected amount sold
             uint256 expectedSoldInLastEpoch = _getExpectedAmountSoldWithEpochOffset(-2);
-            bool isLtExpectedSoldInLastEpoch = totalTokensSold_ < expectedSoldInLastEpoch;
+            bool isLtExpectedSoldInLastEpoch = v.totalTokensSold_ < expectedSoldInLastEpoch;
 
             if (isLtExpectedSoldInLastEpoch) {
                 // find how many empty epochs are implied by the difference between expected amount sold and total tokens sold
@@ -741,32 +756,32 @@ contract Doppler is BaseHook {
                     emptyEpochs++;
                     offset--;
                     expectedSold = _getExpectedAmountSoldWithEpochOffset(offset);
-                    isLtExpectedSoldInLastEpoch = totalTokensSold_ < expectedSold;
+                    isLtExpectedSoldInLastEpoch = v.totalTokensSold_ < expectedSold;
                 } while (isLtExpectedSoldInLastEpoch);
 
-                accumulatorDelta += _getMaxTickDeltaPerEpoch() * int256(emptyEpochs);
+                v.accumulatorDelta += _getMaxTickDeltaPerEpoch() * int256(emptyEpochs);
             }
 
-            state.totalTokensSoldLastEpoch = totalTokensSold_;
+            state.totalTokensSoldLastEpoch = v.totalTokensSold_;
         }
 
         // Get the expected amount sold and the net sold in the last epoch
         uint256 expectedAmountSold = _getExpectedAmountSoldWithEpochOffset(0);
-        int256 netSold = int256(totalTokensSold_) - int256(state.totalTokensSoldLastEpoch);
+        int256 netSold = int256(v.totalTokensSold_) - int256(state.totalTokensSoldLastEpoch);
 
-        state.totalTokensSoldLastEpoch = totalTokensSold_;
+        state.totalTokensSoldLastEpoch = v.totalTokensSold_;
 
-        bool lteExpectedSold = totalTokensSold_ <= expectedAmountSold;
+        bool lteExpectedSold = v.totalTokensSold_ <= expectedAmountSold;
 
         // Possible if no tokens purchased or tokens are sold back into the pool
         if (netSold < 0 && lteExpectedSold) {
-            adjustmentTick = upperSlugPosition.tickLower;
-            accumulatorDelta += _getMaxTickDeltaPerEpoch();
+            v.adjustmentTick = v.upperSlugPosition.tickLower;
+            v.accumulatorDelta += _getMaxTickDeltaPerEpoch();
         } else if (lteExpectedSold) {
             // Safe from overflow since we use 256 bits with a maximum value of (2**24-1) * 1e18
-            adjustmentTick = _alignComputedTickWithTickSpacing(currentTick, key.tickSpacing);
-            accumulatorDelta += _getMaxTickDeltaPerEpoch()
-                * int256(WAD - FullMath.mulDiv(totalTokensSold_, WAD, expectedAmountSold)) / I_WAD;
+            v.adjustmentTick = _alignComputedTickWithTickSpacing(v.currentTick, key.tickSpacing);
+            v.accumulatorDelta += _getMaxTickDeltaPerEpoch()
+                * int256(WAD - FullMath.mulDiv(v.totalTokensSold_, WAD, expectedAmountSold)) / I_WAD;
         } else {
             int24 tauTick = startingTick + int24(state.tickAccumulator / I_WAD);
 
@@ -775,12 +790,12 @@ contract Doppler is BaseHook {
             // The expectedTick is where the upperSlug.tickUpper is/would be placed in the previous epoch
             // The upperTick is not always placed so we have to compute its placement in case it's not
             // This depends on the invariant that upperSlug.tickLower == currentTick at the time of rebalancing
-            adjustmentTick = isToken0
-                ? upperSlugPosition.tickLower + adjustmentTickDelta
-                : upperSlugPosition.tickLower - adjustmentTickDelta;
-            int24 expectedTick = _alignComputedTickWithTickSpacing(adjustmentTick, key.tickSpacing);
+            v.adjustmentTick = isToken0
+                ? v.upperSlugPosition.tickLower + adjustmentTickDelta
+                : v.upperSlugPosition.tickLower - adjustmentTickDelta;
+            int24 expectedTick = _alignComputedTickWithTickSpacing(v.adjustmentTick, key.tickSpacing);
 
-            uint256 epochsRemaining = totalEpochs - currentEpoch;
+            uint256 epochsRemaining = totalEpochs - v.currentEpoch;
             int24 liquidityBound = isToken0 ? tauTick + gamma : tauTick - gamma;
             liquidityBound = epochsRemaining < numPDSlugs
                 ? positions[bytes32(uint256(NUM_DEFAULT_SLUGS + epochsRemaining))].tickUpper
@@ -790,39 +805,39 @@ contract Doppler is BaseHook {
             // This is necessary because there is no liquidity above the curve and we need to
             // ensure that the accumulatorDelta is just based on meaningful (in range) ticks
             if (isToken0) {
-                currentTick = currentTick > liquidityBound ? liquidityBound : currentTick;
+                v.currentTick = v.currentTick > liquidityBound ? liquidityBound : v.currentTick;
             } else {
-                currentTick = currentTick < liquidityBound ? liquidityBound : currentTick;
+                v.currentTick = v.currentTick < liquidityBound ? liquidityBound : v.currentTick;
             }
 
-            accumulatorDelta += int256(currentTick - expectedTick) * I_WAD;
+            v.accumulatorDelta += int256(v.currentTick - expectedTick) * I_WAD;
         }
 
-        newAccumulator = state.tickAccumulator + accumulatorDelta;
+        newAccumulator = state.tickAccumulator + v.accumulatorDelta;
         // Only sstore if there is a nonzero delta
-        if (accumulatorDelta != 0) {
+        if (v.accumulatorDelta != 0) {
             state.tickAccumulator = newAccumulator;
         }
 
-        currentTick =
-            _alignComputedTickWithTickSpacing(adjustmentTick + (accumulatorDelta / I_WAD).toInt24(), key.tickSpacing);
+        v.currentTick =
+            _alignComputedTickWithTickSpacing(v.adjustmentTick + (v.accumulatorDelta / I_WAD).toInt24(), key.tickSpacing);
 
         (int24 tickLower, int24 tickUpper) = _getTicksBasedOnState(newAccumulator, key.tickSpacing);
 
         // It's possible that these are equal
         // If we try to add liquidity in this range though, we revert with a divide by zero
         // Thus we have to create a gap between the two
-        if (!isToken0 && currentTick >= tickLower) {
-            tickLower = currentTick + key.tickSpacing;
-        } else if (isToken0 && currentTick <= tickLower) {
-            tickLower = currentTick - key.tickSpacing;
+        if (!isToken0 && v.currentTick >= tickLower) {
+            tickLower = v.currentTick + key.tickSpacing;
+        } else if (isToken0 && v.currentTick <= tickLower) {
+            tickLower = v.currentTick - key.tickSpacing;
         }
 
-        uint160 sqrtPriceNext = TickMath.getSqrtPriceAtTick(currentTick);
+        uint160 sqrtPriceNext = TickMath.getSqrtPriceAtTick(v.currentTick);
         uint160 sqrtPriceLower = TickMath.getSqrtPriceAtTick(tickLower);
 
         uint256 requiredProceeds =
-            totalTokensSold_ != 0 ? _computeRequiredProceeds(sqrtPriceLower, sqrtPriceNext, totalTokensSold_) : 0;
+            v.totalTokensSold_ != 0 ? _computeRequiredProceeds(sqrtPriceLower, sqrtPriceNext, v.totalTokensSold_) : 0;
 
         // Get existing positions
         Position[] memory prevPositions = new Position[](NUM_DEFAULT_SLUGS - 1 + numPDSlugs);
@@ -850,11 +865,14 @@ contract Doppler is BaseHook {
                 - uint128(feeDeltas.amount1());
         }
 
+        v.numeraireAvailable = numeraireAvailable;
+        v.assetAvailable = assetAvailable;
+
         // Compute new positions
         SlugData memory lowerSlug =
-            _computeLowerSlugData(key, requiredProceeds, numeraireAvailable, totalTokensSold_, tickLower, currentTick);
+            _computeLowerSlugData(key, requiredProceeds, v.numeraireAvailable, v.totalTokensSold_, tickLower, v.currentTick);
         (SlugData memory upperSlug, uint256 assetRemaining) =
-            _computeUpperSlugData(key, totalTokensSold_, currentTick, assetAvailable);
+            _computeUpperSlugData(key, v.totalTokensSold_, v.currentTick, v.assetAvailable);
         SlugData[] memory priceDiscoverySlugs =
             _computePriceDiscoverySlugsData(key, upperSlug, tickUpper, assetRemaining);
 
@@ -882,7 +900,7 @@ contract Doppler is BaseHook {
         }
 
         // Update positions and swap if necessary
-        _update(newPositions, sqrtPriceX96, sqrtPriceNext, key);
+        _update(newPositions, v.sqrtPriceX96, sqrtPriceNext, key);
 
         // Store new position ticks and liquidity
         positions[LOWER_SLUG_SALT] = newPositions[0];
@@ -895,7 +913,7 @@ contract Doppler is BaseHook {
                 positions[bytes32(uint256(NUM_DEFAULT_SLUGS + i))] = newPositions[NUM_DEFAULT_SLUGS - 1 + i];
             }
         }
-        emit Rebalance(currentTick, tickLower, tickUpper, currentEpoch);
+        emit Rebalance(v.currentTick, tickLower, tickUpper, v.currentEpoch);
     }
 
     /// @notice If offset == 0, retrieves the end time of the current epoch
