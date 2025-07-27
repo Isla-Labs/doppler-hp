@@ -14,7 +14,6 @@ import { TickMath } from "@v4-core/libraries/TickMath.sol";
 import { LiquidityAmounts } from "@v4-core-test/utils/LiquidityAmounts.sol";
 import { SqrtPriceMath } from "@v4-core/libraries/SqrtPriceMath.sol";
 import { FullMath } from "@v4-core/libraries/FullMath.sol";
-import { FixedPoint96 } from "@v4-core/libraries/FixedPoint96.sol";
 import { TransientStateLibrary } from "@v4-core/libraries/TransientStateLibrary.sol";
 import { FixedPointMathLib } from "@solady/utils/FixedPointMathLib.sol";
 import { ProtocolFeeLibrary } from "@v4-core/libraries/ProtocolFeeLibrary.sol";
@@ -23,6 +22,7 @@ import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { DynamicFee } from "src/libs/DynamicFee.sol";
 import { DopplerDynamicFeeLib } from "src/libs/DopplerDynamicFeeLib.sol";
+import { DopplerHelper } from "src/libs/DopplerHelper.sol";
 import { TreasuryManager } from "src/TreasuryManager.sol";
 
 /// @notice Data for a liquidity slug, an intermediate representation of a `Position`
@@ -501,7 +501,7 @@ contract Doppler is BaseHook {
                     TickMath.getSqrtPriceAtTick(lowerSlug.tickUpper + (isToken0 ? key.tickSpacing : -key.tickSpacing));
 
                 uint160 sqrtPriceX96 = TickMath.getSqrtPriceAtTick(currentTick);
-                _update(newPositions, sqrtPriceX96, sqrtPriceX96Next, key);
+                DopplerHelper.update(poolManager, isToken0, newPositions, sqrtPriceX96, sqrtPriceX96Next, key);
                 positions[LOWER_SLUG_SALT] = newPositions[0];
 
                 // Add 1 to numPDSlugs because we don't need to clear the lower slug
@@ -900,7 +900,7 @@ contract Doppler is BaseHook {
         }
 
         // Update positions and swap if necessary
-        _update(newPositions, v.sqrtPriceX96, sqrtPriceNext, key);
+        DopplerHelper.update(poolManager, isToken0, newPositions, v.sqrtPriceX96, sqrtPriceNext, key);
 
         // Store new position ticks and liquidity
         positions[LOWER_SLUG_SALT] = newPositions[0];
@@ -1075,7 +1075,7 @@ contract Doppler is BaseHook {
         } else {
             slug.tickLower = tickLower;
             slug.tickUpper = currentTick;
-            slug.liquidity = _computeLiquidity(
+            slug.liquidity = DopplerHelper.computeLiquidity(
                 !isToken0,
                 TickMath.getSqrtPriceAtTick(tickLower),
                 TickMath.getSqrtPriceAtTick(currentTick),
@@ -1126,7 +1126,7 @@ contract Doppler is BaseHook {
 
         // We compute the amount of liquidity to place only if the tick range is non-zero
         if (slug.tickLower != slug.tickUpper) {
-            slug.liquidity = _computeLiquidity(
+            slug.liquidity = DopplerHelper.computeLiquidity(
                 isToken0,
                 TickMath.getSqrtPriceAtTick(slug.tickLower),
                 TickMath.getSqrtPriceAtTick(slug.tickUpper),
@@ -1194,7 +1194,7 @@ contract Doppler is BaseHook {
             tick = _alignComputedTickWithTickSpacing(slugs[i].tickLower + slugRangeDelta, key.tickSpacing);
             slugs[i].tickUpper = tick;
 
-            slugs[i].liquidity = _computeLiquidity(
+            slugs[i].liquidity = DopplerHelper.computeLiquidity(
                 isToken0,
                 TickMath.getSqrtPriceAtTick(slugs[i].tickLower),
                 TickMath.getSqrtPriceAtTick(slugs[i].tickUpper),
@@ -1205,41 +1205,6 @@ contract Doppler is BaseHook {
         }
 
         return slugs;
-    }
-
-    /// @notice Compute the target price given a numerator and denominator
-    ///         Converts to Q96
-    /// @param num The numerator
-    /// @param denom The denominator
-    function _computeTargetPriceX96(uint256 num, uint256 denom) internal pure returns (uint160) {
-        uint256 targetPriceX96 = FullMath.mulDiv(num, FixedPoint96.Q96, denom);
-
-        if (targetPriceX96 > type(uint160).max) {
-            return 0;
-        }
-
-        return targetPriceX96.toUint160();
-    }
-
-    /// @notice Computes the single sided liquidity amount for a given price range and amount of tokens
-    /// @param forToken0 Whether the liquidity is for token0
-    /// @param lowerPrice The lower sqrt price of the range
-    /// @param upperPrice The upper sqrt price of the range
-    /// @param amount The amount of tokens to place as liquidity
-    function _computeLiquidity(
-        bool forToken0,
-        uint160 lowerPrice,
-        uint160 upperPrice,
-        uint256 amount
-    ) internal pure returns (uint128) {
-        // We decrement the amount by 1 to avoid rounding errors
-        amount = amount != 0 ? amount - 1 : amount;
-
-        if (forToken0) {
-            return LiquidityAmounts.getLiquidityForAmount0(lowerPrice, upperPrice, amount);
-        } else {
-            return LiquidityAmounts.getLiquidityForAmount1(lowerPrice, upperPrice, amount);
-        }
     }
 
     /// @notice Clears the positions in the pool, accounts for accrued fees, and returns the balance deltas
@@ -1270,72 +1235,7 @@ contract Doppler is BaseHook {
         state.feesAccrued = add(state.feesAccrued, feeDeltas);
     }
 
-    /// @notice Updates the positions in the pool, accounts for accrued fees, and swaps to new price if necessary
-    /// @param newPositions The new positions to add
-    /// @param currentPrice The current price of the pool
-    /// @param swapPrice The target price to swap to
-    /// @param key The pool key
-    function _update(
-        Position[] memory newPositions,
-        uint160 currentPrice,
-        uint160 swapPrice,
-        PoolKey memory key
-    ) internal {
-        if (swapPrice != currentPrice) {
-            // Since there's no liquidity in the pool, swapping a non-zero amount allows us to reset its price.
-            poolManager.swap(
-                key,
-                IPoolManager.SwapParams({
-                    zeroForOne: swapPrice < currentPrice,
-                    amountSpecified: 1,
-                    sqrtPriceLimitX96: swapPrice
-                }),
-                ""
-            );
-        }
 
-        for (uint256 i; i < newPositions.length; ++i) {
-            if (newPositions[i].liquidity != 0) {
-                // Add liquidity to new position
-                poolManager.modifyLiquidity(
-                    key,
-                    IPoolManager.ModifyLiquidityParams({
-                        tickLower: isToken0 ? newPositions[i].tickLower : newPositions[i].tickUpper,
-                        tickUpper: isToken0 ? newPositions[i].tickUpper : newPositions[i].tickLower,
-                        liquidityDelta: newPositions[i].liquidity.toInt128(),
-                        salt: bytes32(uint256(newPositions[i].salt))
-                    }),
-                    ""
-                );
-            }
-        }
-
-        int256 currency0Delta = poolManager.currencyDelta(address(this), key.currency0);
-        int256 currency1Delta = poolManager.currencyDelta(address(this), key.currency1);
-
-        if (currency0Delta > 0) {
-            poolManager.take(key.currency0, address(this), uint256(currency0Delta));
-        }
-
-        if (currency1Delta > 0) {
-            poolManager.take(key.currency1, address(this), uint256(currency1Delta));
-        }
-
-        if (currency0Delta < 0) {
-            poolManager.sync(key.currency0);
-            if (Currency.unwrap(key.currency0) != address(0)) {
-                key.currency0.transfer(address(poolManager), uint256(-currency0Delta));
-            }
-
-            poolManager.settle{ value: Currency.unwrap(key.currency0) == address(0) ? uint256(-currency0Delta) : 0 }();
-        }
-
-        if (currency1Delta < 0) {
-            poolManager.sync(key.currency1);
-            key.currency1.transfer(address(poolManager), uint256(-currency1Delta));
-            poolManager.settle();
-        }
-    }
 
     /// @dev Data passed through the `unlock` call to the PoolManager to the `_unlockCallback`
     /// back in this contract. Using a struct here is usually to avoid using the wrong types.
@@ -1432,7 +1332,7 @@ contract Doppler is BaseHook {
             });
         }
 
-        _update(newPositions, sqrtPriceCurrent, sqrtPriceNext, key);
+        DopplerHelper.update(poolManager, isToken0, newPositions, sqrtPriceCurrent, sqrtPriceNext, key);
 
         positions[LOWER_SLUG_SALT] = newPositions[0];
         positions[UPPER_SLUG_SALT] = newPositions[1];
@@ -1457,10 +1357,10 @@ contract Doppler is BaseHook {
         uint160 targetPriceX96;
         if (isToken0) {
             // Q96 Target price (not sqrtPrice)
-            targetPriceX96 = _computeTargetPriceX96(totalProceeds_, totalTokensSold_);
+            targetPriceX96 = DopplerHelper.computeTargetPriceX96(totalProceeds_, totalTokensSold_);
         } else {
             // Q96 Target price (not sqrtPrice)
-            targetPriceX96 = _computeTargetPriceX96(totalTokensSold_, totalProceeds_);
+            targetPriceX96 = DopplerHelper.computeTargetPriceX96(totalTokensSold_, totalProceeds_);
         }
 
         if (targetPriceX96 == 0) {
@@ -1474,7 +1374,7 @@ contract Doppler is BaseHook {
                 key.tickSpacing
             );
             slug.tickLower = isToken0 ? slug.tickUpper - key.tickSpacing : slug.tickUpper + key.tickSpacing;
-            slug.liquidity = _computeLiquidity(
+            slug.liquidity = DopplerHelper.computeLiquidity(
                 !isToken0,
                 TickMath.getSqrtPriceAtTick(slug.tickLower),
                 TickMath.getSqrtPriceAtTick(slug.tickUpper),
