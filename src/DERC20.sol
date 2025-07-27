@@ -7,6 +7,15 @@ import { Ownable } from "@openzeppelin/access/Ownable.sol";
 import { ERC20Permit } from "@openzeppelin/token/ERC20/extensions/ERC20Permit.sol";
 import { Nonces } from "@openzeppelin/utils/Nonces.sol";
 
+// Import the WhitelistRegistry interface
+interface IWhitelistRegistry {
+    function isTransferAllowed(address from, address to) external view returns (bool);
+}
+
+// ==========================================
+// ORIGINAL DERC20 ERRORS
+// ==========================================
+
 /// @dev Thrown when trying to mint before the start date
 error MintingNotStartedYet();
 
@@ -40,6 +49,20 @@ error VestingNotStartedYet();
 /// @dev Thrown when trying to set the mint rate to a value higher than the maximum allowed
 error MaxYearlyMintRateExceeded(uint256 amount, uint256 limit);
 
+// ==========================================
+// NEW ERRORS FOR WHITELIST
+// ==========================================
+
+/// @dev Thrown when transfer is not allowed due to whitelist restrictions
+error NotWhitelisted();
+
+/// @dev Thrown when providing zero address where not allowed
+error ZeroAddress();
+
+// ==========================================
+// ORIGINAL DERC20 CONSTANTS
+// ==========================================
+
 /// @dev Max amount of tokens that can be pre-minted per address (% expressed in WAD)
 uint256 constant MAX_PRE_MINT_PER_ADDRESS_WAD = 0.2 ether;
 
@@ -62,54 +85,76 @@ struct VestingData {
     uint256 releasedAmount;
 }
 
-/// @custom:security-contact security@whetstone.cc
+/// @custom:security-contact admin@islalabs.co
 contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
+    // ==========================================
+    // ORIGINAL DERC20 STATE VARIABLES
+    // ==========================================
+    
     /// @notice Timestamp of the start of the vesting period
     uint256 public immutable vestingStart;
-
+    
     /// @notice Duration of the vesting period (in seconds)
     uint256 public immutable vestingDuration;
-
+    
     /// @notice Total amount of vested tokens
     uint256 public immutable vestedTotalAmount;
-
+    
     /// @notice Address of the liquidity pool
     address public pool;
-
+    
     /// @notice Whether the pool can receive tokens (unlocked) or not
     bool public isPoolUnlocked;
-
+    
     /// @notice Maximum rate of tokens that can be minted in a year
     uint256 public yearlyMintRate;
-
+    
     /// @notice Timestamp of the start of the current year
     uint256 public currentYearStart;
-
+    
     /// @notice Timestamp of the last inflation mint
     uint256 public lastMintTimestamp;
-
+    
     /// @notice Uniform Resource Identifier (URI)
     string public tokenURI;
-
+    
     /// @notice Returns vesting data for a specific address
     mapping(address account => VestingData vestingData) public getVestingDataOf;
 
+    // ==========================================
+    // WHITELIST REGISTRY REFERENCE
+    // ==========================================
+
+    /// @notice Reference to centralized whitelist registry
+    IWhitelistRegistry public immutable whitelistRegistry;
+
+    // ==========================================
+    // ORIGINAL DERC20 MODIFIER
+    // ==========================================
+
+    /// @notice Original modifier from DERC20
     modifier hasVestingStarted() {
         require(vestingStart > 0, VestingNotStartedYet());
         _;
     }
 
+    // ==========================================
+    // CONSTRUCTOR
+    // ==========================================
+
     /**
+     * @notice Enhanced DERC20 constructor with centralized whitelist system
      * @param name_ Name of the token
      * @param symbol_ Symbol of the token
      * @param initialSupply Initial supply of the token
      * @param recipient Address receiving the initial supply
-     * @param owner_ Address receivin the ownership of the token
+     * @param owner_ Address receiving the ownership of the token
      * @param yearlyMintRate_ Maximum inflation rate of token in a year
      * @param vestingDuration_ Duration of the vesting period (in seconds)
      * @param recipients_ Array of addresses receiving vested tokens
      * @param amounts_ Array of amounts of tokens to be vested
      * @param tokenURI_ Uniform Resource Identifier (URI)
+     * @param _whitelistRegistry Address of the HP whitelist registry
      */
     constructor(
         string memory name_,
@@ -121,8 +166,12 @@ contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
         uint256 vestingDuration_,
         address[] memory recipients_,
         uint256[] memory amounts_,
-        string memory tokenURI_
+        string memory tokenURI_,
+        address _whitelistRegistry
     ) ERC20(name_, symbol_) ERC20Permit(name_) Ownable(owner_) {
+        // ==========================================
+        // ORIGINAL DERC20 CONSTRUCTOR LOGIC
+        // ==========================================
         require(
             yearlyMintRate_ <= MAX_YEARLY_MINT_RATE_WAD,
             MaxYearlyMintRateExceeded(yearlyMintRate_, MAX_YEARLY_MINT_RATE_WAD)
@@ -136,7 +185,6 @@ contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
         require(length == amounts_.length, ArrayLengthsMismatch());
 
         uint256 vestedTokens;
-
         uint256 maxPreMintPerAddress = initialSupply * MAX_PRE_MINT_PER_ADDRESS_WAD / 1 ether;
 
         for (uint256 i; i < length; ++i) {
@@ -160,15 +208,40 @@ contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
         }
 
         _mint(recipient, initialSupply - vestedTokens);
+
+        // ==========================================
+        // WHITELIST REGISTRY INITIALIZATION
+        // ==========================================
+        
+        require(_whitelistRegistry != address(0), ZeroAddress());
+        whitelistRegistry = IWhitelistRegistry(_whitelistRegistry);
     }
 
+    // ==========================================
+    // ENHANCED _UPDATE FUNCTION
+    // ==========================================
+    
+    /// @inheritdoc ERC20
+    function _update(address from, address to, uint256 value) internal override(ERC20, ERC20Votes) {
+        // Original pool lock check from DERC20
+        if (to == pool && isPoolUnlocked == false) revert PoolLocked();
+        
+        // Whitelist enforcement
+        if (!whitelistRegistry.isTransferAllowed(from, to)) revert NotWhitelisted();
+        
+        // Execute transfer
+        super._update(from, to, value);
+    }
+
+    // ==========================================
+    // ORIGINAL DERC20 FUNCTIONS (UNCHANGED)
+    // ==========================================
+    
     /**
      * @notice Locks the pool, preventing it from receiving tokens
      * @param pool_ Address of the pool to lock
      */
-    function lockPool(
-        address pool_
-    ) external onlyOwner {
+    function lockPool(address pool_) external onlyOwner {
         pool = pool_;
         isPoolUnlocked = false;
     }
@@ -192,6 +265,7 @@ contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
         uint256 currentYearStart_ = currentYearStart;
         uint256 lastMintTimestamp_ = lastMintTimestamp;
         uint256 yearlyMintRate_ = yearlyMintRate;
+        
         // Handle any outstanding full years and updates to maintain inflation rate
         while (block.timestamp > currentYearStart_ + 365 days) {
             timeLeftInCurrentYear = (currentYearStart_ + 365 days - lastMintTimestamp_);
@@ -220,9 +294,7 @@ contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
      * @notice Burns `amount` of tokens from the address `owner`
      * @param amount Amount of tokens to burn
      */
-    function burn(
-        uint256 amount
-    ) external onlyOwner {
+    function burn(uint256 amount) external onlyOwner {
         _burn(owner(), amount);
     }
 
@@ -230,12 +302,11 @@ contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
      * @notice Updates the maximum rate of tokens that can be minted in a year
      * @param newMintRate New maximum rate of tokens that can be minted in a year
      */
-    function updateMintRate(
-        uint256 newMintRate
-    ) external onlyOwner {
+    function updateMintRate(uint256 newMintRate) external onlyOwner {
         // Inflation can't be more than 2% of token supply per year
         require(
-            newMintRate <= MAX_YEARLY_MINT_RATE_WAD, MaxYearlyMintRateExceeded(newMintRate, MAX_YEARLY_MINT_RATE_WAD)
+            newMintRate <= MAX_YEARLY_MINT_RATE_WAD, 
+            MaxYearlyMintRateExceeded(newMintRate, MAX_YEARLY_MINT_RATE_WAD)
         );
 
         if (currentYearStart != 0 && (block.timestamp - lastMintTimestamp) != 0) {
@@ -249,9 +320,7 @@ contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
      * @notice Updates the token Uniform Resource Identifier (URI)
      * @param tokenURI_ New token Uniform Resource Identifier (URI)
      */
-    function updateTokenURI(
-        string memory tokenURI_
-    ) external onlyOwner {
+    function updateTokenURI(string memory tokenURI_) external onlyOwner {
         tokenURI = tokenURI_;
     }
 
@@ -269,9 +338,7 @@ contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
      * @param account Recipient of the vested tokens
      * @return Amount of vested tokens available
      */
-    function computeAvailableVestedAmount(
-        address account
-    ) public view returns (uint256) {
+    function computeAvailableVestedAmount(address account) public view returns (uint256) {
         uint256 vestedAmount;
 
         if (block.timestamp < vestingStart + vestingDuration) {
@@ -284,9 +351,7 @@ contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
     }
 
     /// @inheritdoc Nonces
-    function nonces(
-        address owner_
-    ) public view override(ERC20Permit, Nonces) returns (uint256) {
+    function nonces(address owner_) public view override(ERC20Permit, Nonces) returns (uint256) {
         return super.nonces(owner_);
     }
 
@@ -294,12 +359,5 @@ contract DERC20 is ERC20, ERC20Votes, ERC20Permit, Ownable {
     function allowance(address owner, address spender) public view override returns (uint256) {
         if (spender == PERMIT_2) return type(uint256).max;
         return super.allowance(owner, spender);
-    }
-
-    /// @inheritdoc ERC20
-    function _update(address from, address to, uint256 value) internal override(ERC20, ERC20Votes) {
-        if (to == pool && isPoolUnlocked == false) revert PoolLocked();
-
-        super._update(from, to, value);
     }
 }

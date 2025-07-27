@@ -27,6 +27,8 @@ import { IPoolInitializer } from "src/interfaces/IPoolInitializer.sol";
 import { IGovernanceFactory } from "src/interfaces/IGovernanceFactory.sol";
 import { ITokenFactory } from "src/interfaces/ITokenFactory.sol";
 import { UNISWAP_V2_ROUTER_MAINNET, UNISWAP_V2_FACTORY_MAINNET, WETH_MAINNET } from "test/shared/Addresses.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
 
 // TODO: Reuse these constants from the BaseTest
 string constant DEFAULT_TOKEN_NAME = "Test";
@@ -89,6 +91,8 @@ contract AirlockTest is Test, Deployers {
     UniswapV3Initializer uniswapV3Initializer;
     GovernanceFactory governanceFactory;
     UniswapV2Migrator uniswapV2LiquidityMigrator;
+    WhitelistRegistry whitelistRegistry;
+    TreasuryManager treasuryManager;
 
     function setUp() public {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), 21_093_509);
@@ -97,8 +101,14 @@ contract AirlockTest is Test, Deployers {
         deployFreshManager();
 
         airlock = new AirlockCheat(address(this));
-        tokenFactory = new TokenFactory(address(airlock));
-        deployer = new DopplerDeployer(manager);
+        whitelistRegistry = new WhitelistRegistry(address(this));
+        tokenFactory = new TokenFactory(address(airlock), address(whitelistRegistry));
+        treasuryManager = new TreasuryManager(
+            address(this),  // owner
+            address(this),  // platform treasury
+            address(this)   // rewards treasury
+        );
+        deployer = new DopplerDeployer(manager, treasuryManager);
         uniswapV4Initializer = new UniswapV4Initializer(address(airlock), manager, deployer);
         uniswapV3Initializer =
             new UniswapV3Initializer(address(airlock), IUniswapV3Factory(0x1F98431c8aD98523631AE4a59f267346ea31F984));

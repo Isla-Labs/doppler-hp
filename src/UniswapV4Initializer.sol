@@ -9,17 +9,21 @@ import { TickMath } from "@v4-core/libraries/TickMath.sol";
 import { IPoolInitializer } from "src/interfaces/IPoolInitializer.sol";
 import { Doppler } from "src/Doppler.sol";
 import { ImmutableAirlock } from "src/base/ImmutableAirlock.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
 
 error InvalidTokenOrder();
 
 contract DopplerDeployer {
     // These variables are purposely not immutable to avoid hitting the contract size limit
     IPoolManager public poolManager;
+    TreasuryManager public treasuryManager;
 
     constructor(
-        IPoolManager poolManager_
+        IPoolManager poolManager_,
+        TreasuryManager treasuryManager_
     ) {
         poolManager = poolManager_;
+        treasuryManager = treasuryManager_;
     }
 
     function deploy(uint256 numTokensToSell, bytes32 salt, bytes calldata data) external returns (Doppler) {
@@ -53,7 +57,8 @@ contract DopplerDeployer {
             isToken0,
             numPDSlugs,
             msg.sender,
-            lpFee
+            lpFee,
+            treasuryManager
         );
 
         return doppler;

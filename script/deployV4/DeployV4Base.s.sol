@@ -8,7 +8,10 @@ contract DeployV4Base is DeployV4Script {
         _scriptData = V4ScriptData({
             airlock: 0x660eAaEdEBc968f8f3694354FA8EC0b4c5Ba8D12,
             poolManager: 0x498581fF718922c3f8e6A244956aF099B2652b2b,
-            stateView: 0xA3c0c9b65baD0b08107Aa264b0f3dB444b867A71
+            stateView: 0xA3c0c9b65baD0b08107Aa264b0f3dB444b867A71,
+            platformTreasury: 0xe2954AB0F759AEEC5b4237fcc2a0b06e5a820d0D,
+            rewardsTreasury: 0xd432a083Ecf69D57A889F4B46DF1b644Bc2a1671,
+            whitelistRegistry: 0x0000000000000000000000000000000000000000  // Add this (from Base mainnet)
         });
     }
 }

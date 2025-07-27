@@ -28,6 +28,7 @@ import {
     UNISWAP_V2_FACTORY_MAINNET,
     UNISWAP_V2_ROUTER_MAINNET
 } from "test/shared/Addresses.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
 
 int24 constant DEFAULT_LOWER_TICK = 167_520;
 int24 constant DEFAULT_UPPER_TICK = 200_040;
@@ -44,6 +45,7 @@ contract V3Test is Test {
     UniswapV2Migrator public uniswapV2LiquidityMigrator;
     TokenFactory public tokenFactory;
     GovernanceFactory public governanceFactory;
+    WhitelistRegistry whitelistRegistry;
 
     function setUp() public {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), 21_093_509);
@@ -56,7 +58,8 @@ contract V3Test is Test {
             IUniswapV2Router02(UNISWAP_V2_ROUTER_MAINNET),
             address(0xb055)
         );
-        tokenFactory = new TokenFactory(address(airlock));
+        whitelistRegistry = new WhitelistRegistry(address(this));
+        tokenFactory = new TokenFactory(address(airlock), address(whitelistRegistry));
         governanceFactory = new GovernanceFactory(address(airlock));
 
         address[] memory modules = new address[](4);

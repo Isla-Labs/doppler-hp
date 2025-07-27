@@ -18,12 +18,14 @@ import {
     InvalidProceedLimits,
     InvalidStartTime
 } from "src/Doppler.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
 
 contract DopplerNoValidateHook is Doppler {
     constructor(
         HookConfig memory config,
         address poolManager,
         address initializer,
+        TreasuryManager treasuryManager,
         bytes32 salt
     )
         Doppler(
@@ -40,7 +42,8 @@ contract DopplerNoValidateHook is Doppler {
             config.isToken0,
             config.numPDSlugs,
             initializer,
-            config.initialLpFee
+            config.initialLpFee,
+            treasuryManager
         )
     { }
 
@@ -51,25 +54,38 @@ contract DopplerNoValidateHook is Doppler {
 
 /// @dev Just a small contract to deploy Doppler contracts and be able to use `vm.expectRevert` easily
 contract Deployer {
-    function deploy(
-        HookConfig memory config,
-        address poolManager,
-        address initializer,
-        bytes32 salt
-    ) external returns (DopplerNoValidateHook) {
-        DopplerNoValidateHook doppler = new DopplerNoValidateHook{ salt: salt }(config, poolManager, initializer, salt);
-        return doppler;
+        function deploy(
+            HookConfig memory config,
+            address poolManager,
+            address initializer,
+            TreasuryManager treasuryManager,
+            bytes32 salt
+        ) external returns (DopplerNoValidateHook) {
+            DopplerNoValidateHook doppler = new DopplerNoValidateHook{ salt: salt }(
+                config, 
+                poolManager, 
+                initializer, 
+                treasuryManager,
+                salt
+            );
+            return doppler;
+        }
     }
-}
 
 contract ConstructorTest is Test {
     Deployer deployer;
+    TreasuryManager treasuryManager;
     address manager = address(0x1234);
     address initializer = address(0x5678);
     bytes32 salt = salt;
 
     function setUp() public {
         deployer = new Deployer();
+        treasuryManager = new TreasuryManager(
+            address(this),  // owner
+            address(this),  // platform treasury  
+            address(this)   // rewards treasury
+        );
     }
 
     function test_constructor_RevertsWhenStartingTimeLowerThanBlockTimestamp() public {
@@ -77,89 +93,89 @@ contract ConstructorTest is Test {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_0();
         config.startingTime = 0;
         vm.expectRevert(InvalidStartTime.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidTimeRange_WhenStartingTimeEqualToEndingTime() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_0();
         config.startingTime = config.endingTime;
         vm.expectRevert(InvalidTimeRange.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidTimeRange_WhenStartingTimeGreaterThanToEndingTime() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_0();
         config.startingTime = config.endingTime + 1;
         vm.expectRevert(InvalidTimeRange.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidTickRange_WhenIsToken0_AndStartingTickLowerThanEndingTick() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_0();
         (config.startingTick, config.endingTick) = (config.endingTick, config.startingTick);
         vm.expectRevert(InvalidTickRange.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidTickRange_WhenIsToken1_AndStartingTickGreaterThanEndingTick() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_1();
         (config.startingTick, config.endingTick) = (config.endingTick, config.startingTick);
         vm.expectRevert(InvalidTickRange.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidGamma_WhenGammaZero() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_1();
         config.gamma = 0;
         vm.expectRevert(InvalidGamma.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidGamma_WhenGammaIsNegative() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_1();
         config.gamma = -1;
         vm.expectRevert(InvalidGamma.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidGamma_WhenInvalidUpperSlugCalculation() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_0();
         config.gamma = 3;
         vm.expectRevert(InvalidGamma.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidEpochLength_WhenTimeDeltaNotDivisibleByEpochLength() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_0();
         config.epochLength = 3000;
         vm.expectRevert(InvalidEpochLength.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidNumPDSlugs_WithZeroSlugs() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_0();
         config.numPDSlugs = 0;
         vm.expectRevert(InvalidNumPDSlugs.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidNumPDSlugs_GreaterThanMax() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_0();
         config.numPDSlugs = MAX_PRICE_DISCOVERY_SLUGS + 1;
         vm.expectRevert(InvalidNumPDSlugs.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_RevertsInvalidProceedLimits_WhenMinimumProceedsGreaterThanMaximumProceeds() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_0();
         (config.minimumProceeds, config.maximumProceeds) = (config.maximumProceeds, config.minimumProceeds);
         vm.expectRevert(InvalidProceedLimits.selector);
-        deployer.deploy(config, manager, initializer, salt);
+        deployer.deploy(config, manager, initializer, treasuryManager, salt);
     }
 
     function test_constructor_Succeeds_WithValidParameters() public {
         HookConfig memory config = HookConfigs.DEFAULT_CONFIG_0();
-        DopplerNoValidateHook doppler = deployer.deploy(config, manager, initializer, salt);
+        DopplerNoValidateHook doppler = deployer.deploy(config, manager, initializer, treasuryManager, salt);
 
         assertEq(doppler.numTokensToSell(), config.numTokensToSell);
         assertEq(doppler.minimumProceeds(), config.minimumProceeds);

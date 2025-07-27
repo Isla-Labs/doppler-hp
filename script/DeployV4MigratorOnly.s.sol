@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import { Script, console } from "forge-std/Script.sol";
 import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
 import { UniswapV4MigratorHook } from "src/UniswapV4MigratorHook.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";  // <-- ADD THIS
 import { StreamableFeesLocker } from "src/StreamableFeesLocker.sol";
 import { Airlock } from "src/Airlock.sol";
 import { IPoolManager, IHooks } from "@v4-core/interfaces/IPoolManager.sol";
@@ -16,10 +17,11 @@ struct ScriptData {
     address positionManager;
     address create2Factory;
     address streamableFeesLocker;
+    address treasuryManager;  // <-- ADD THIS
 }
 
 /**
- * @title Doppler V4 Migrator (and hook) Deployment Script
+ * @title HighPotential V4 Migrator (and hook) Deployment Script
  * @notice Use this script if the rest of the protocol (Airlock and co) is already deployed
  * @dev Note that after deploying, the following steps must be performed:
  * - Approve the `UniswapV4Migrator` as a `LiquidityMigrator` module in the Airlock
@@ -31,7 +33,7 @@ abstract contract DeployV4MigratorOnlyScript is Script {
     function setUp() public virtual;
 
     function run() public {
-        console.log(unicode"🚀 Deploying on chain %s with sender %s...", vm.toString(block.chainid), msg.sender);
+        console.log(unicode"🚀 Deploying HighPotential V4 Migrator (hook-only) on chain %s with sender %s...", vm.toString(block.chainid), msg.sender);
 
         vm.startBroadcast();
 
@@ -43,28 +45,40 @@ abstract contract DeployV4MigratorOnlyScript is Script {
             MineV4MigratorHookParams({
                 poolManager: _scriptData.poolManager,
                 migrator: precomputedUniswapV4Migrator,
-                hookDeployer: _scriptData.create2Factory
+                hookDeployer: _scriptData.create2Factory,
+                treasuryManager: _scriptData.treasuryManager  // <-- ADD THIS TO MINING PARAMS
             })
         );
 
-        // Deploy migrator with pre-mined hook address
+        // Deploy migrator with pre-mined hook address (using existing StreamableFeesLocker)
         UniswapV4Migrator uniswapV4Migrator = new UniswapV4Migrator(
             _scriptData.airlock,
             IPoolManager(_scriptData.poolManager),
             PositionManager(payable(_scriptData.positionManager)),
-            StreamableFeesLocker(payable(_scriptData.streamableFeesLocker)),
+            StreamableFeesLocker(payable(_scriptData.streamableFeesLocker)),  // <-- EXISTING LOCKER
             IHooks(minedMigratorHook)
         );
 
-        // Deploy hook with deployed migrator address
-        UniswapV4MigratorHook migratorHook =
-            new UniswapV4MigratorHook{ salt: salt }(IPoolManager(_scriptData.poolManager), uniswapV4Migrator);
+        // Deploy hook with deployed migrator address AND treasury manager
+        UniswapV4MigratorHook migratorHook = new UniswapV4MigratorHook{ salt: salt }(
+            IPoolManager(_scriptData.poolManager), 
+            uniswapV4Migrator,
+            TreasuryManager(_scriptData.treasuryManager)  // <-- ADD THIS
+        );
 
         /// Verify that the hook was set correctly in the UniswapV4Migrator constructor
         require(
             address(uniswapV4Migrator.migratorHook()) == address(migratorHook),
             "Migrator hook is not the expected address"
         );
+
+        console.log(unicode"✨ UniswapV4MigratorHook was successfully deployed!");
+        console.log("UniswapV4MigratorHook address: %s", address(migratorHook));
+        console.log("TreasuryManager reference: %s", _scriptData.treasuryManager);
+        console.log("StreamableFeesLocker reference: %s", _scriptData.streamableFeesLocker);
+
+        console.log(unicode"✨ UniswapV4Migrator was successfully deployed!");
+        console.log("UniswapV4Migrator address: %s", address(uniswapV4Migrator));
 
         vm.stopBroadcast();
     }
@@ -77,7 +91,8 @@ contract DeployV4MigratorOnlyBaseSepoliaScript is DeployV4MigratorOnlyScript {
             poolManager: 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408,
             positionManager: 0x4B2C77d209D3405F41a037Ec6c77F7F5b8e2ca80,
             create2Factory: 0x4e59b44847b379578588920cA78FbF26c0B4956C,
-            streamableFeesLocker: 0x3345E557c5C0b474bE1eb4693264008B8562Aa9c
+            streamableFeesLocker: 0x3345E557c5C0b474bE1eb4693264008B8562Aa9c,
+            treasuryManager: 0x0000000000000000000000000000000000000000  // <-- UPDATE WITH ACTUAL ADDRESS
         });
     }
 }
@@ -89,7 +104,8 @@ contract DeployV4MigratorOnlyBaseScript is DeployV4MigratorOnlyScript {
             poolManager: 0x498581fF718922c3f8e6A244956aF099B2652b2b,
             positionManager: 0x7C5f5A4bBd8fD63184577525326123B519429bDc,
             create2Factory: 0x4e59b44847b379578588920cA78FbF26c0B4956C,
-            streamableFeesLocker: 0x0A00775D71a42cd33D62780003035e7F5b47bD3A
+            streamableFeesLocker: 0x0A00775D71a42cd33D62780003035e7F5b47bD3A,
+            treasuryManager: 0x0000000000000000000000000000000000000000  // <-- UPDATE WITH ACTUAL ADDRESS
         });
     }
 }

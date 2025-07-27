@@ -16,6 +16,7 @@ import { SenderNotAirlock } from "src/base/ImmutableAirlock.sol";
 import { UniswapV2Migrator, IUniswapV2Router02, IUniswapV2Factory } from "src/UniswapV2Migrator.sol";
 import { TokenFactory } from "src/TokenFactory.sol";
 import { GovernanceFactory } from "src/GovernanceFactory.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
 
 import {
     WETH_MAINNET,
@@ -31,6 +32,7 @@ contract V3PocTest is Test {
     UniswapV2Migrator public uniswapV2LiquidityMigrator;
     TokenFactory public tokenFactory;
     GovernanceFactory public governanceFactory;
+    WhitelistRegistry whitelistRegistry;
 
     // HAVE MAINNET_RPC_URL SET IN .env
     function setUp() public {
@@ -44,7 +46,8 @@ contract V3PocTest is Test {
             IUniswapV2Router02(UNISWAP_V2_ROUTER_MAINNET),
             address(0xb055)
         );
-        tokenFactory = new TokenFactory(address(airlock));
+        whitelistRegistry = new WhitelistRegistry(address(this));
+        tokenFactory = new TokenFactory(address(airlock), address(whitelistRegistry));
         governanceFactory = new GovernanceFactory(address(airlock));
 
         address[] memory modules = new address[](4);

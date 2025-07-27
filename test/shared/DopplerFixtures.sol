@@ -32,6 +32,8 @@ import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { MAX_TICK_SPACING } from "src/Doppler.sol";
 import { DopplerTickLibrary } from "../utils/DopplerTickLibrary.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
 
 uint256 constant DEFAULT_NUM_TOKENS_TO_SELL = 100_000e18;
 uint256 constant DEFAULT_MINIMUM_PROCEEDS = 100e18;
@@ -78,6 +80,8 @@ contract DopplerFixtures is Deployers {
     TokenFactory public tokenFactory;
     GovernanceFactory public governanceFactory;
     UniswapV2Migrator public migrator;
+    WhitelistRegistry whitelistRegistry;
+    TreasuryManager treasuryManager;
 
     IUniswapV2Factory public uniswapV2Factory = IUniswapV2Factory(UNISWAP_V2_FACTORY_UNICHAIN_SEPOLIA);
     IUniswapV2Router02 public uniswapV2Router = IUniswapV2Router02(UNISWAP_V2_ROUTER_UNICHAIN_SEPOLIA);
@@ -97,10 +101,17 @@ contract DopplerFixtures is Deployers {
     function _deployAirlockAndModules() internal {
         manager = new PoolManager(address(this));
 
+        whitelistRegistry = new WhitelistRegistry(address(this));
+        treasuryManager = new TreasuryManager(
+            address(this),  // owner
+            address(this),  // platform treasury
+            address(this)   // rewards treasury
+        );
+
         airlock = new Airlock(address(this));
-        deployer = new DopplerDeployer(manager);
+        deployer = new DopplerDeployer(manager, treasuryManager);
         initializer = new UniswapV4Initializer(address(airlock), manager, deployer);
-        tokenFactory = new TokenFactory(address(airlock));
+        tokenFactory = new TokenFactory(address(airlock), address(whitelistRegistry));
         governanceFactory = new GovernanceFactory(address(airlock));
         migrator = new UniswapV2Migrator(address(airlock), uniswapV2Factory, uniswapV2Router, address(0xb055));
 

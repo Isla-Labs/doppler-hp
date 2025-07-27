@@ -17,6 +17,7 @@ import {
     NoMintableAmount
 } from "src/DERC20.sol";
 import { IERC20Errors } from "@openzeppelin/interfaces/draft-IERC6093.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
 
 uint256 constant INITIAL_SUPPLY = 1e26;
 uint256 constant YEARLY_MINT_RATE = 0.02e18;
@@ -27,7 +28,12 @@ address constant RECIPIENT = address(0xa71ce);
 address constant OWNER = address(0xb0b);
 
 contract DERC20Test is Test {
+    WhitelistRegistry whitelistRegistry;
     DERC20 public token;
+
+    function setUp() public {
+        whitelistRegistry = new WhitelistRegistry(address(this));  // Add this
+    }
 
     function test_constructor() public {
         address[] memory recipients = new address[](2);
@@ -39,7 +45,7 @@ contract DERC20Test is Test {
         amounts[1] = 2e23;
 
         token = new DERC20(
-            NAME, SYMBOL, INITIAL_SUPPLY, RECIPIENT, OWNER, YEARLY_MINT_RATE, VESTING_DURATION, recipients, amounts, ""
+            NAME, SYMBOL, INITIAL_SUPPLY, RECIPIENT, OWNER, YEARLY_MINT_RATE, VESTING_DURATION, recipients, amounts, "", address(whitelistRegistry)
         );
 
         assertEq(token.name(), NAME, "Wrong name");
@@ -64,7 +70,7 @@ contract DERC20Test is Test {
 
         vm.expectRevert(ArrayLengthsMismatch.selector);
         token = new DERC20(
-            NAME, SYMBOL, INITIAL_SUPPLY, RECIPIENT, OWNER, YEARLY_MINT_RATE, VESTING_DURATION, recipients, amounts, ""
+            NAME, SYMBOL, INITIAL_SUPPLY, RECIPIENT, OWNER, YEARLY_MINT_RATE, VESTING_DURATION, recipients, amounts, "", address(whitelistRegistry)
         );
     }
 
@@ -81,7 +87,7 @@ contract DERC20Test is Test {
             )
         );
         token = new DERC20(
-            NAME, SYMBOL, INITIAL_SUPPLY, RECIPIENT, OWNER, YEARLY_MINT_RATE, VESTING_DURATION, recipients, amounts, ""
+            NAME, SYMBOL, INITIAL_SUPPLY, RECIPIENT, OWNER, YEARLY_MINT_RATE, VESTING_DURATION, recipients, amounts, "", address(whitelistRegistry)
         );
     }
 
@@ -96,7 +102,7 @@ contract DERC20Test is Test {
 
         vm.expectRevert(abi.encodeWithSelector(MaxPreMintPerAddressExceeded.selector, amounts[0] * 2, amounts[0]));
         token = new DERC20(
-            NAME, SYMBOL, INITIAL_SUPPLY, RECIPIENT, OWNER, YEARLY_MINT_RATE, VESTING_DURATION, recipients, amounts, ""
+            NAME, SYMBOL, INITIAL_SUPPLY, RECIPIENT, OWNER, YEARLY_MINT_RATE, VESTING_DURATION, recipients, amounts, "", address(whitelistRegistry)
         );
     }
 
@@ -116,7 +122,7 @@ contract DERC20Test is Test {
             )
         );
         token = new DERC20(
-            NAME, SYMBOL, INITIAL_SUPPLY, RECIPIENT, OWNER, YEARLY_MINT_RATE, VESTING_DURATION, recipients, amounts, ""
+            NAME, SYMBOL, INITIAL_SUPPLY, RECIPIENT, OWNER, YEARLY_MINT_RATE, VESTING_DURATION, recipients, amounts, "", address(whitelistRegistry)
         );
     }
 
@@ -132,7 +138,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         token.lockPool(pool);
         assertEq(token.pool(), pool, "Wrong pool");
@@ -151,7 +158,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         vm.prank(address(0xbeef));
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xbeef)));
@@ -169,7 +177,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         vm.prank(address(0xbeef));
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xbeef)));
@@ -187,7 +196,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         token.unlockPool();
         assertEq(token.isPoolUnlocked(), true, "Pool should be unlocked");
@@ -207,7 +217,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         token.lockPool(pool);
         vm.expectRevert(PoolLocked.selector);
@@ -226,7 +237,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         token.lockPool(pool);
         token.approve(address(0xbeef), 1);
@@ -246,7 +258,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         vm.warp(block.timestamp + 365 days);
         vm.expectRevert(MintingNotStartedYet.selector);
@@ -264,7 +277,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         token.unlockPool();
 
@@ -293,7 +307,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         token.unlockPool();
 
@@ -317,7 +332,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         token.unlockPool();
 
@@ -349,7 +365,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         token.unlockPool();
         vm.expectRevert(NoMintableAmount.selector);
@@ -367,7 +384,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
 
         vm.warp(block.timestamp + 365 days);
@@ -395,7 +413,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         vm.prank(address(0xbeef));
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xbeef)));
@@ -414,7 +433,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         token.lockPool(pool);
         vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, address(this), 0, 1));
@@ -432,7 +452,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
         token.unlockPool();
         vm.warp(token.lastMintTimestamp() + 365 days);
@@ -462,7 +483,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
 
         assertEq(token.tokenURI(), "", "Token URI should be empty");
@@ -481,7 +503,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             new address[](0),
             new uint256[](0),
-            ""
+            "",
+            address(whitelistRegistry)
         );
 
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
@@ -504,7 +527,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             recipients,
             amounts,
-            ""
+            "",
+            address(whitelistRegistry)
         );
 
         token.unlockPool();
@@ -532,7 +556,8 @@ contract DERC20Test is Test {
             VESTING_DURATION,
             recipients,
             amounts,
-            ""
+            "",
+            address(whitelistRegistry)
         );
 
         token.unlockPool();

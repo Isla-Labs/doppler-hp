@@ -4,16 +4,20 @@ pragma solidity ^0.8.13;
 import { Test } from "forge-std/Test.sol";
 import { TokenFactory } from "src/TokenFactory.sol";
 import { SenderNotAirlock } from "src/base/ImmutableAirlock.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
 
 contract TokenFactoryTest is Test {
     TokenFactory public factory;
+    WhitelistRegistry whitelistRegistry;
 
     function setUp() public {
-        factory = new TokenFactory(address(this));
+        whitelistRegistry = new WhitelistRegistry(address(this));
+        factory = new TokenFactory(address(this), address(whitelistRegistry));
     }
 
     function test_constructor() public view {
         assertEq(address(factory.airlock()), address(this));
+        assertEq(address(factory.whitelistRegistry()), address(whitelistRegistry));  // Add this test
     }
 
     function test_create() public {

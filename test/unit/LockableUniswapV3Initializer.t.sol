@@ -29,6 +29,7 @@ import {
 import { BeneficiaryData } from "src/StreamableFeesLocker.sol";
 import { SenderNotAirlock } from "src/base/ImmutableAirlock.sol";
 import { DERC20 } from "src/DERC20.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
 
 int24 constant DEFAULT_LOWER_TICK = 167_520;
 int24 constant DEFAULT_UPPER_TICK = 200_040;
@@ -38,10 +39,12 @@ uint256 constant DEFAULT_MAX_SHARE_TO_BE_SOLD = 0.23 ether;
 uint16 constant DEFAULT_NUM_POSITIONS = 10;
 
 contract LockableUniswapV3InitializerTest is Test {
+    WhitelistRegistry whitelistRegistry;
     LockableUniswapV3Initializer public initializer;
     address public airlockOwner = makeAddr("airlockOwner");
 
     function setUp() public {
+        whitelistRegistry = new WhitelistRegistry(address(this));
         // vm.createSelectFork(vm.envString("BASE_SEPOLIA_RPC_URL"), 28_099_832);
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), 21_093_509);
         initializer = new LockableUniswapV3Initializer(
@@ -61,7 +64,7 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_initialize() public returns (address pool) {
         DERC20 token =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         token.approve(address(initializer), type(uint256).max);
 
         pool = initializer.initialize(
@@ -94,7 +97,7 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_initialize_InitializedStatus() public {
         DERC20 token =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         token.approve(address(initializer), type(uint256).max);
 
         address pool = initializer.initialize(
@@ -120,7 +123,7 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_initialize_LockedStatus() public {
         DERC20 token =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         token.approve(address(initializer), type(uint256).max);
 
         address pool = initializer.initialize(
@@ -146,7 +149,7 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_initialize_RevertsIfAlreadyInitialized() public {
         DERC20 token =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         token.approve(address(initializer), type(uint256).max);
 
         initializer.initialize(
@@ -193,7 +196,7 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_initialize_RevertsWhenMaxShareToBeSoldExceeded() public {
         DERC20 token =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         token.approve(address(initializer), type(uint256).max);
 
         vm.expectRevert(abi.encodeWithSelector(MaxShareToBeSoldExceeded.selector, WAD + 1, WAD));
@@ -217,7 +220,7 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_initialize_RevertsWhenInvalidTickRange() public {
         DERC20 token =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         token.approve(address(initializer), type(uint256).max);
 
         vm.expectRevert(
@@ -243,7 +246,7 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_initialize_RevertsWhenInvalidTickLower() public {
         DERC20 token =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         token.approve(address(initializer), type(uint256).max);
 
         vm.expectRevert(abi.encodeWithSelector(InvalidTickRange.selector, DEFAULT_LOWER_TICK - 1, 60));
@@ -267,7 +270,7 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_initialize_RevertsWhenInvalidTickUpper() public {
         DERC20 token =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         token.approve(address(initializer), type(uint256).max);
 
         vm.expectRevert(abi.encodeWithSelector(InvalidTickRange.selector, DEFAULT_UPPER_TICK + 1, 60));
@@ -291,7 +294,7 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_initialize_RevertsWhenInvalidFee() public {
         DERC20 token =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         token.approve(address(initializer), type(uint256).max);
 
         uint24 fee = 2000;
@@ -317,9 +320,9 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_collectFees() public returns (address pool) {
         DERC20 token0 =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         DERC20 token1 =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
 
         address asset = address(token0);
         address numeraire = address(token1);
@@ -387,9 +390,9 @@ contract LockableUniswapV3InitializerTest is Test {
     function test_exitLiquidity() public returns (address pool) {
         bool isToken0;
         DERC20 token =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         while (address(token) < address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2)) {
-            token = new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            token = new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         }
 
         isToken0 = address(token) < address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
@@ -489,17 +492,17 @@ contract LockableUniswapV3InitializerTest is Test {
 
     function test_initialize_token0AndToken1SamePrice() public {
         DERC20 isToken0 =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         while (address(isToken0) > address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2)) {
             isToken0 =
-                new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+                new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         }
         // will be isToken0
         DERC20 notIsToken0 =
-            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+            new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         while (address(notIsToken0) < address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2)) {
             notIsToken0 =
-                new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "");
+                new DERC20("", "", 2e27, address(this), address(this), 0, 0, new address[](0), new uint256[](0), "", address(whitelistRegistry));
         }
         isToken0.approve(address(initializer), type(uint256).max);
         notIsToken0.approve(address(initializer), type(uint256).max);

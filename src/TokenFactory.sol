@@ -5,11 +5,18 @@ import { ITokenFactory } from "src/interfaces/ITokenFactory.sol";
 import { DERC20 } from "src/DERC20.sol";
 import { ImmutableAirlock } from "src/base/ImmutableAirlock.sol";
 
-/// @custom:security-contact security@whetstone.cc
+/// @custom:security-contact admin@islalabs.co
 contract TokenFactory is ITokenFactory, ImmutableAirlock {
+    /// @notice Address of the whitelist registry
+    address public immutable whitelistRegistry;
+
     constructor(
-        address airlock_
-    ) ImmutableAirlock(airlock_) { }
+        address airlock_,
+        address whitelistRegistry_
+    ) ImmutableAirlock(airlock_) {
+        require(whitelistRegistry_ != address(0), "TokenFactory: zero address");
+        whitelistRegistry = whitelistRegistry_;
+    }
 
     /**
      * @notice Creates a new DERC20 token
@@ -47,7 +54,8 @@ contract TokenFactory is ITokenFactory, ImmutableAirlock {
                 vestingDuration,
                 recipients,
                 amounts,
-                tokenURI
+                tokenURI,
+                whitelistRegistry
             )
         );
     }

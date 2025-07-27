@@ -28,6 +28,8 @@ import { TokenFactory, ITokenFactory } from "src/TokenFactory.sol";
 import { GovernanceFactory, IGovernanceFactory } from "src/GovernanceFactory.sol";
 import { StreamableFeesLocker, BeneficiaryData } from "src/StreamableFeesLocker.sol";
 import { Doppler } from "src/Doppler.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
 
 contract V4MigratorTest is BaseTest, DeployPermit2 {
     IAllowanceTransfer public permit2;
@@ -40,6 +42,8 @@ contract V4MigratorTest is BaseTest, DeployPermit2 {
     TokenFactory public tokenFactory;
     GovernanceFactory public governanceFactory;
     StreamableFeesLocker public locker;
+    WhitelistRegistry whitelistRegistry;
+    TreasuryManager treasuryManager;
 
     function test_migrate_v4(
         int16 tickSpacing
@@ -49,7 +53,12 @@ contract V4MigratorTest is BaseTest, DeployPermit2 {
         permit2 = IAllowanceTransfer(deployPermit2());
 
         airlock = new Airlock(address(this));
-        deployer = new DopplerDeployer(manager);
+        treasuryManager = new TreasuryManager(
+            address(this),  // owner
+            address(this),  // platform treasury
+            address(this)   // rewards treasury
+        );
+        deployer = new DopplerDeployer(manager, treasuryManager);
         initializer = new UniswapV4Initializer(address(airlock), manager, deployer);
         positionManager = Deploy.positionManager(
             address(manager), address(permit2), type(uint256).max, address(0), address(0), hex"beef"
@@ -65,7 +74,8 @@ contract V4MigratorTest is BaseTest, DeployPermit2 {
         );
         deployCodeTo("UniswapV4MigratorHook", abi.encode(address(manager), address(migrator)), address(migratorHook));
         locker.approveMigrator(address(migrator));
-        tokenFactory = new TokenFactory(address(airlock));
+        whitelistRegistry = new WhitelistRegistry(address(this));
+        tokenFactory = new TokenFactory(address(airlock), address(whitelistRegistry));
         governanceFactory = new GovernanceFactory(address(airlock));
 
         address integrator = makeAddr("integrator");
@@ -150,11 +160,11 @@ contract V4MigratorTest is BaseTest, DeployPermit2 {
             i++;
             deal(address(this), 0.1 ether);
 
-            (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks) =
+            (Currency currency0, Currency currency1, uint24 fee, int24 poolTickSpacing, IHooks hooks) =
                 Doppler(payable(hook)).poolKey();
 
             BalanceDelta delta = swapRouter.swap{ value: 0.0001 ether }(
-                PoolKey({ currency0: currency0, currency1: currency1, hooks: hooks, fee: fee, tickSpacing: tickSpacing }),
+                PoolKey({ currency0: currency0, currency1: currency1, hooks: hooks, fee: fee, tickSpacing: poolTickSpacing }),
                 IPoolManager.SwapParams(true, -int256(0.0001 ether), TickMath.MIN_SQRT_PRICE + 1),
                 PoolSwapTest.TestSettings(false, false),
                 ""

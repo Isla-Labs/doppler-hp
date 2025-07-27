@@ -10,6 +10,7 @@ import { StateLibrary } from "@v4-core/libraries/StateLibrary.sol";
 import { BalanceDelta } from "@v4-core/types/BalanceDelta.sol";
 import { BaseHook } from "@v4-periphery/utils/BaseHook.sol";
 import { Doppler, SlugData, Position } from "src/Doppler.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
 
 contract DopplerImplementation is Doppler {
     using PoolIdLibrary for PoolKey;
@@ -30,6 +31,7 @@ contract DopplerImplementation is Doppler {
         uint256 _numPDSlugs,
         address initializer_,
         uint24 lpFee_,
+        TreasuryManager _treasuryManager,
         IHooks addressToEtch
     )
         Doppler(
@@ -46,7 +48,8 @@ contract DopplerImplementation is Doppler {
             _isToken0,
             _numPDSlugs,
             initializer_,
-            lpFee_
+            lpFee_,
+            _treasuryManager
         )
     {
         Hooks.validateHookPermissions(addressToEtch, getHookPermissions());

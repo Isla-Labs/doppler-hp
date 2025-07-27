@@ -34,6 +34,8 @@ import {
     SQRT_RATIO_2_1
 } from "test/shared/DopplerFixtures.sol";
 import { MineV4Params, mineV4 } from "test/shared/AirlockMiner.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
 
 int24 constant DEFAULT_START_TICK = 6000;
 int24 constant DEFAULT_END_TICK = 60_000;
@@ -48,12 +50,21 @@ contract V4Test is Test {
     TokenFactory public tokenFactory;
     GovernanceFactory public governanceFactory;
     UniswapV2Migrator public migrator;
+    WhitelistRegistry whitelistRegistry;
+    TreasuryManager treasuryManager;
 
     function setUp() public {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), 21_688_329);
 
+        whitelistRegistry = new WhitelistRegistry(address(this));
+        treasuryManager = new TreasuryManager(
+            address(this),  // owner
+            address(this),  // platform treasury
+            address(this)   // rewards treasury
+        );
+
         airlock = new Airlock(address(this));
-        deployer = new DopplerDeployer(IPoolManager(UNISWAP_V4_POOL_MANAGER_MAINNET));
+        deployer = new DopplerDeployer(IPoolManager(UNISWAP_V4_POOL_MANAGER_MAINNET), treasuryManager);
         initializer =
             new UniswapV4Initializer(address(airlock), IPoolManager(UNISWAP_V4_POOL_MANAGER_MAINNET), deployer);
 
@@ -63,7 +74,7 @@ contract V4Test is Test {
             IUniswapV2Router02(UNISWAP_V2_ROUTER_MAINNET),
             address(0xb055)
         );
-        tokenFactory = new TokenFactory(address(airlock));
+        tokenFactory = new TokenFactory(address(airlock), address(whitelistRegistry));
         governanceFactory = new GovernanceFactory(address(airlock));
 
         address[] memory modules = new address[](4);

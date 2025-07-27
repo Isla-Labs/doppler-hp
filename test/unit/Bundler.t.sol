@@ -15,6 +15,7 @@ import { InitData } from "src/UniswapV3Initializer.sol";
 import { ILiquidityMigrator } from "src/interfaces/ILiquidityMigrator.sol";
 import { CreateParams } from "src/Airlock.sol";
 import { Bundler } from "src/Bundler.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
 
 address payable constant airlock = payable(0x77EbfBAE15AD200758E9E2E61597c0B07d731254);
 address payable constant ur = payable(0xEf740bf23aCaE26f6492B10de645D6B98dC8Eaf3);
@@ -24,6 +25,7 @@ address constant weth = 0x4200000000000000000000000000000000000006;
 contract BundlerTest is Test {
     Bundler bundler;
     TokenFactory tokenFactory;
+    WhitelistRegistry whitelistRegistry;
 
     receive() external payable { }
 
@@ -31,7 +33,8 @@ contract BundlerTest is Test {
         vm.createSelectFork(vm.envString("UNICHAIN_MAINNET_RPC_URL"), 10_594_210);
         bundler = new Bundler(Airlock(airlock), UniversalRouter(ur), IQuoterV2(quoterV2));
 
-        tokenFactory = new TokenFactory(airlock);
+        whitelistRegistry = new WhitelistRegistry(address(this));
+        tokenFactory = new TokenFactory(address(airlock), address(whitelistRegistry));
         vm.prank(Airlock(airlock).owner());
 
         address[] memory modules = new address[](1);

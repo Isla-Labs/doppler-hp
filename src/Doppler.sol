@@ -6,7 +6,7 @@ import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { Hooks } from "@v4-core/libraries/Hooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@v4-core/types/PoolId.sol";
-import { BeforeSwapDelta, BeforeSwapDeltaLibrary } from "@v4-core/types/BeforeSwapDelta.sol";
+import { BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta } from "@v4-core/types/BeforeSwapDelta.sol";
 import { BalanceDelta, add, BalanceDeltaLibrary } from "@v4-core/types/BalanceDelta.sol";
 import { LPFeeLibrary } from "@v4-core/libraries/LPFeeLibrary.sol";
 import { StateLibrary } from "@v4-core/libraries/StateLibrary.sol";
@@ -21,6 +21,9 @@ import { ProtocolFeeLibrary } from "@v4-core/libraries/ProtocolFeeLibrary.sol";
 import { SwapMath } from "@v4-core/libraries/SwapMath.sol";
 import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
+import { DynamicFee } from "src/libs/DynamicFee.sol";
+import { DopplerDynamicFeeLib } from "src/libs/DopplerDynamicFeeLib.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
 
 /// @notice Data for a liquidity slug, an intermediate representation of a `Position`
 /// @dev Output struct when computing slug data for a `Position`
@@ -62,6 +65,9 @@ struct Position {
     uint128 liquidity;
     uint8 salt;
 }
+
+/// @notice Thrown when providing zero address where not allowed
+error ZeroAddress();
 
 /// @notice Thrown when the gamma value is invalid
 error InvalidGamma();
@@ -199,6 +205,9 @@ contract Doppler is BaseHook {
     /// another pool from reusing the hook and messing with its state
     bool public isInitialized;
 
+    /// @notice Treasury manager for centralized fee distribution
+    TreasuryManager public immutable treasuryManager;
+
     // The following variables are NOT immutable to avoid hitting the contract size limit
 
     /// @notice Uniswap V4 pool key associated with this hook
@@ -283,9 +292,13 @@ contract Doppler is BaseHook {
         bool isToken0_,
         uint256 numPDSlugs_,
         address initializer_,
-        uint24 initialLpFee_
+        uint24 initialLpFee_,
+        TreasuryManager _treasuryManager
     ) BaseHook(poolManager_) {
         initialLpFee = initialLpFee_;
+
+        require(address(_treasuryManager) != address(0), ZeroAddress());
+        treasuryManager = _treasuryManager;
 
         // Check that the current time is before the starting time
         if (block.timestamp > startingTime_) revert InvalidStartTime();
@@ -390,22 +403,43 @@ contract Doppler is BaseHook {
     /// @return delta The delta to apply before the swap
     /// @return feeOverride Optional fee override, this is set to 0 in doppler
     function _beforeSwap(
-        address,
+        address sender,
         PoolKey calldata key,
         IPoolManager.SwapParams calldata swapParams,
-        bytes calldata
+        bytes calldata hookData
     ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
         if (earlyExit) revert MaximumProceedsReached();
 
         if (block.timestamp < startingTime) revert CannotSwapBeforeStartTime();
 
+        // Handle dynamic fees for buy swaps
+        BeforeSwapDelta feeDelta = DopplerDynamicFeeLib.processDynamicFeesBeforeSwap(
+            treasuryManager,
+            poolManager,
+            sender,
+            key,
+            swapParams
+        );
+
         // We can skip rebalancing if we're in an epoch that already had a rebalance
         if (_getCurrentEpoch() <= uint256(state.lastEpoch)) {
-            return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
+            return (BaseHook.beforeSwap.selector, feeDelta, 0);
         }
 
-        uint24 fee;
+        uint24 fee = _handleRebalancingLogic(key, swapParams, hookData);
+        return (BaseHook.beforeSwap.selector, feeDelta, fee);
+    }
 
+    /// @notice Helper function to handle the existing Doppler rebalancing logic
+    /// @param key The pool key
+    /// @param swapParams The swap parameters
+    /// @param hookData Hook data
+    /// @return fee The fee override
+    function _handleRebalancingLogic(
+        PoolKey calldata key,
+        IPoolManager.SwapParams calldata swapParams, 
+        bytes calldata hookData
+    ) internal returns (uint24 fee) {
         // Only check proceeds if we're after maturity and we haven't already triggered insufficient proceeds
         if (block.timestamp >= endingTime && !insufficientProceeds) {
             // If we haven't raised the minimum proceeds, we allow for all asset tokens to be sold back into
@@ -476,8 +510,6 @@ contract Doppler is BaseHook {
 
             fee = 0 | LPFeeLibrary.OVERRIDE_FEE_FLAG;
         }
-
-        return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, fee);
     }
 
     /// @notice Called by the poolManager immediately after a swap is executed
@@ -489,15 +521,42 @@ contract Doppler is BaseHook {
     /// @return selector The function selector for afterSwap
     /// @return delta The delta amount to return to the pool manager (always 0)
     function _afterSwap(
-        address,
+        address sender,
         PoolKey calldata key,
         IPoolManager.SwapParams calldata swapParams,
         BalanceDelta swapDelta,
-        bytes calldata
+        bytes calldata hookData
     ) internal override returns (bytes4, int128) {
+        // Handle dynamic fees for sell swaps
+        int128 dynamicFeeDelta = DopplerDynamicFeeLib.processDynamicFeesAfterSwap(
+            treasuryManager,
+            poolManager,
+            sender,
+            key,
+            swapParams,
+            swapDelta,
+            hookData,
+            insufficientProceeds
+        );
+
         if (insufficientProceeds) {
-            return (BaseHook.afterSwap.selector, 0);
+            return (BaseHook.afterSwap.selector, dynamicFeeDelta);
         }
+
+        _handleExistingAfterSwapLogic(key, swapParams, swapDelta);
+
+        return (BaseHook.afterSwap.selector, dynamicFeeDelta);
+    }
+
+    /// @notice Helper function to handle the existing Doppler afterSwap logic
+    /// @param key The pool key
+    /// @param swapParams The swap parameters
+    /// @param swapDelta The swap delta
+    function _handleExistingAfterSwapLogic(
+        PoolKey calldata key,
+        IPoolManager.SwapParams calldata swapParams,
+        BalanceDelta swapDelta
+    ) internal {
         // Get current tick
         PoolId poolId = key.toId();
         (uint160 sqrtPriceX96,, uint24 protocolFee, uint24 lpFee) = poolManager.getSlot0(poolId);
@@ -574,8 +633,6 @@ contract Doppler is BaseHook {
         }
 
         emit Swap(currentTick, state.totalProceeds, state.totalTokensSold);
-
-        return (BaseHook.afterSwap.selector, 0);
     }
 
     /// @notice Called by the poolManager immediately before liquidity is added
@@ -1421,8 +1478,8 @@ contract Doppler is BaseHook {
             afterSwap: true,
             beforeDonate: true,
             afterDonate: false,
-            beforeSwapReturnDelta: false,
-            afterSwapReturnDelta: false,
+            beforeSwapReturnDelta: true,
+            afterSwapReturnDelta: true,
             afterAddLiquidityReturnDelta: false,
             afterRemoveLiquidityReturnDelta: false
         });

@@ -26,7 +26,8 @@ import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
 import { UniswapV3Initializer, IUniswapV3Factory } from "src/UniswapV3Initializer.sol";
 import { UniswapV4Initializer, DopplerDeployer } from "src/UniswapV4Initializer.sol";
 import { Bundler } from "src/Bundler.sol";
-import { DopplerLensQuoter } from "src/lens/DopplerLens.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
 
 struct ScriptData {
     bool deployBundler;
@@ -41,6 +42,8 @@ struct ScriptData {
     address universalRouter;
     address stateView;
     address positionManager;
+    address platformTreasury;
+    address rewardsTreasury;
 }
 
 /**
@@ -68,7 +71,9 @@ abstract contract DeployScript is Script {
             DopplerDeployer dopplerDeployer,
             StreamableFeesLocker streamableFeesLocker,
             UniswapV4Migrator uniswapV4Migrator,
-            UniswapV4MigratorHook migratorHook
+            UniswapV4MigratorHook migratorHook,
+            WhitelistRegistry whitelistRegistry,
+            TreasuryManager treasuryManager
         ) = _deployDoppler(_scriptData);
 
         console.log(unicode"✨ Contracts were successfully deployed!");
@@ -81,6 +86,9 @@ abstract contract DeployScript is Script {
             "|---|---|\n",
             "| Airlock | ",
             _toMarkdownLink(_scriptData.explorerUrl, address(airlock)),
+            " |\n",
+            "| WhitelistRegistry | ",
+            _toMarkdownLink(_scriptData.explorerUrl, address(whitelistRegistry)),
             " |\n",
             "| TokenFactory | ",
             _toMarkdownLink(_scriptData.explorerUrl, address(tokenFactory)),
@@ -115,11 +123,6 @@ abstract contract DeployScript is Script {
             log = string.concat(log, "| Bundler | ", _toMarkdownLink(_scriptData.explorerUrl, address(bundler)), " |\n");
         }
 
-        if (_scriptData.deployLens) {
-            DopplerLensQuoter lens = _deployLens(_scriptData);
-            log = string.concat(log, "| Lens | ", _toMarkdownLink(_scriptData.explorerUrl, address(lens)), " |\n");
-        }
-
         vm.writeFile(string.concat("./deployments/", vm.toString(block.chainid), ".md"), log);
 
         vm.stopBroadcast();
@@ -139,7 +142,9 @@ abstract contract DeployScript is Script {
             DopplerDeployer dopplerDeployer,
             StreamableFeesLocker streamableFeesLocker,
             UniswapV4Migrator uniswapV4Migrator,
-            UniswapV4MigratorHook migratorHook
+            UniswapV4MigratorHook migratorHook,
+            WhitelistRegistry whitelistRegistry,
+            TreasuryManager treasuryManager
         )
     {
         // Let's check that a valid protocol owner is set
@@ -153,7 +158,13 @@ abstract contract DeployScript is Script {
         // Owner of the protocol is first set as the deployer to allow the whitelisting of modules,
         // ownership is then transferred to the address defined as the "protocol_owner"
         airlock = new Airlock(msg.sender);
-        tokenFactory = new TokenFactory(address(airlock));
+        whitelistRegistry = new WhitelistRegistry(msg.sender);
+        treasuryManager = new TreasuryManager(
+            msg.sender,  // initial owner (will be transferred later)
+            scriptData.platformTreasury,  // platform treasury address
+            scriptData.rewardsTreasury   // rewards treasury address
+        );
+        tokenFactory = new TokenFactory(address(airlock), address(whitelistRegistry));
         uniswapV3Initializer =
             new UniswapV3Initializer(address(airlock), IUniswapV3Factory(scriptData.uniswapV3Factory));
         governanceFactory = new GovernanceFactory(address(airlock));
@@ -164,7 +175,7 @@ abstract contract DeployScript is Script {
             scriptData.protocolOwner
         );
 
-        dopplerDeployer = new DopplerDeployer(IPoolManager(scriptData.poolManager));
+        dopplerDeployer = new DopplerDeployer(IPoolManager(scriptData.poolManager), treasuryManager);
         uniswapV4Initializer =
             new UniswapV4Initializer(address(airlock), IPoolManager(scriptData.poolManager), dopplerDeployer);
 
@@ -179,7 +190,8 @@ abstract contract DeployScript is Script {
             MineV4MigratorHookParams({
                 poolManager: _scriptData.poolManager,
                 migrator: precomputedUniswapV4Migrator,
-                hookDeployer: 0x4e59b44847b379578588920cA78FbF26c0B4956C
+                hookDeployer: 0x4e59b44847b379578588920cA78FbF26c0B4956C,
+                treasuryManager: address(treasuryManager)
             })
         );
 
@@ -193,7 +205,11 @@ abstract contract DeployScript is Script {
         );
 
         // Deploy hook with deployed migrator address
-        migratorHook = new UniswapV4MigratorHook{ salt: salt }(IPoolManager(_scriptData.poolManager), uniswapV4Migrator);
+        migratorHook = new UniswapV4MigratorHook{ salt: salt }(
+            IPoolManager(_scriptData.poolManager), 
+            uniswapV4Migrator,
+            treasuryManager
+        );
 
         /// Verify that the hook was set correctly in the UniswapV4Migrator constructor
         require(
@@ -229,14 +245,6 @@ abstract contract DeployScript is Script {
         require(scriptData.quoterV2 != address(0), "Cannot find QuoterV2 address!");
         bundler =
             new Bundler(airlock, UniversalRouter(payable(scriptData.universalRouter)), IQuoterV2(scriptData.quoterV2));
-    }
-
-    function _deployLens(
-        ScriptData memory scriptData
-    ) internal returns (DopplerLensQuoter lens) {
-        require(scriptData.poolManager != address(0), "Cannot find PoolManager address!");
-        require(scriptData.stateView != address(0), "Cannot find StateView address!");
-        lens = new DopplerLensQuoter(IPoolManager(scriptData.poolManager), IStateView(scriptData.stateView));
     }
 
     function _toMarkdownLink(

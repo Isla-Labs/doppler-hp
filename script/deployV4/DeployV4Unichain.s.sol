@@ -8,7 +8,10 @@ contract DeployV4Unichain is DeployV4Script {
         _scriptData = V4ScriptData({
             airlock: 0x77EbfBAE15AD200758E9E2E61597c0B07d731254,
             poolManager: 0x1F98400000000000000000000000000000000004,
-            stateView: 0x86e8631A016F9068C3f085fAF484Ee3F5fDee8f2
+            stateView: 0x86e8631A016F9068C3f085fAF484Ee3F5fDee8f2,
+            platformTreasury: 0x0000000000000000000000000000000000000000,
+            rewardsTreasury: 0x0000000000000000000000000000000000000000,
+            whitelistRegistry: 0x0000000000000000000000000000000000000000
         });
     }
 }

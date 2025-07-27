@@ -390,7 +390,6 @@ contract RebalanceTest is BaseTest {
         vm.warp(hook.startingTime());
 
         bool isToken0 = hook.isToken0();
-        int256 I_WAD = 1e18;
 
         int256 tickDeltaPerEpoch = hook.getMaxTickDeltaPerEpoch();
 
