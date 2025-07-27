@@ -22,16 +22,8 @@ import { SwapMath } from "@v4-core/libraries/SwapMath.sol";
 import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { DynamicFee } from "src/libs/DynamicFee.sol";
+import { DopplerDynamicFeeLib } from "src/libs/DopplerDynamicFeeLib.sol";
 import { TreasuryManager } from "src/TreasuryManager.sol";
-
-/// @notice Context for multi-hop swap coordination
-/// @dev Disables double-fee collection during Player Token -> Player Token swaps
-/// @param isMultiHop
-/// @param isUsdc
-struct MultiHopContext {
-    bool isMultiHop;
-    bool isUsdc;
-}
 
 /// @notice Data for a liquidity slug, an intermediate representation of a `Position`
 /// @dev Output struct when computing slug data for a `Position`
@@ -420,38 +412,35 @@ contract Doppler is BaseHook {
 
         if (block.timestamp < startingTime) revert CannotSwapBeforeStartTime();
 
-        BeforeSwapDelta feeDelta = BeforeSwapDeltaLibrary.ZERO_DELTA;
+        // Handle dynamic fees for buy swaps
+        BeforeSwapDelta feeDelta = DopplerDynamicFeeLib.processDynamicFeesBeforeSwap(
+            treasuryManager,
+            poolManager,
+            sender,
+            key,
+            swapParams
+        );
 
-        // Handle dynamic fees for token purchases (ETH → Token)
-        bool isBuy = swapParams.zeroForOne;
-
-        if (isBuy) {
-            uint256 ethPriceUsd = DynamicFee.fetchEthPriceWithFallback();
-            uint256 inputAmount = uint256(swapParams.amountSpecified < 0 ? -swapParams.amountSpecified : swapParams.amountSpecified);
-            uint256 dynamicFeeBps = DynamicFee.calculateDynamicFee(inputAmount, ethPriceUsd);
-
-            if (dynamicFeeBps > 0) {
-                uint256 totalFeeAmount = (inputAmount * dynamicFeeBps) / 10000;
-
-                treasuryManager.distributeFees(
-                    poolManager,
-                    key.currency0,
-                    totalFeeAmount,
-                    sender,
-                    true
-                );
-
-                feeDelta = toBeforeSwapDelta(int128(int256(totalFeeAmount)), 0);
-            }
-        }
 
         // We can skip rebalancing if we're in an epoch that already had a rebalance
         if (_getCurrentEpoch() <= uint256(state.lastEpoch)) {
             return (BaseHook.beforeSwap.selector, feeDelta, 0);
         }
 
-        uint24 fee;
+        uint24 fee = _handleRebalancingLogic(key, swapParams, hookData);
+        return (BaseHook.beforeSwap.selector, feeDelta, fee);
+    }
 
+    /// @notice Helper function to handle the existing Doppler rebalancing logic
+    /// @param key The pool key
+    /// @param swapParams The swap parameters
+    /// @param hookData Hook data
+    /// @return fee The fee override
+    function _handleRebalancingLogic(
+        PoolKey calldata key,
+        IPoolManager.SwapParams calldata swapParams,
+        bytes calldata hookData
+    ) internal returns (uint24 fee) {
         // Only check proceeds if we're after maturity and we haven't already triggered insufficient proceeds
         if (block.timestamp >= endingTime && !insufficientProceeds) {
             // If we haven't raised the minimum proceeds, we allow for all asset tokens to be sold back into
@@ -522,8 +511,6 @@ contract Doppler is BaseHook {
 
             fee = 0 | LPFeeLibrary.OVERRIDE_FEE_FLAG;
         }
-
-        return (BaseHook.beforeSwap.selector, feeDelta, fee);
     }
 
     /// @notice Called by the poolManager immediately after a swap is executed
@@ -541,40 +528,36 @@ contract Doppler is BaseHook {
         BalanceDelta swapDelta,
         bytes calldata hookData
     ) internal override returns (bytes4, int128) {
-        int128 dynamicFeeDelta = 0;
-
-        bool isSell = !swapParams.zeroForOne;
-
-        if (isSell && !insufficientProceeds) {
-            MultiHopContext memory context = _decodeHookData(hookData);
-
-            if (!(context.isMultiHop && !context.isUsdc)) {
-                uint256 ethPriceUsd = DynamicFee.fetchEthPriceWithFallback();
-                uint256 outputAmount = swapDelta.amount0() < 0
-                    ? uint256(uint128(-swapDelta.amount0()))
-                    : uint256(uint128(swapDelta.amount0()));
-                uint256 dynamicFeeBps = DynamicFee.calculateDynamicFee(outputAmount, ethPriceUsd);
-
-                if (dynamicFeeBps > 0) {
-                    uint256 totalFeeAmount = (outputAmount * dynamicFeeBps) / 10000;
-
-                    treasuryManager.distributeFees(
-                        poolManager,
-                        key.currency0,
-                        totalFeeAmount,
-                        sender,
-                        false
-                    );
-
-                    dynamicFeeDelta = int128(int256(totalFeeAmount));
-                }
-            }
-        }
+        // Handle dynamic fees for sell swaps
+        int128 dynamicFeeDelta = DopplerDynamicFeeLib.processDynamicFeesAfterSwap(
+            treasuryManager,
+            poolManager,
+            sender,
+            key,
+            swapParams,
+            swapDelta,
+            hookData,
+            insufficientProceeds
+        );
 
         if (insufficientProceeds) {
             return (BaseHook.afterSwap.selector, dynamicFeeDelta);
         }
-        
+
+        _handleExistingAfterSwapLogic(key, swapParams, swapDelta);
+
+        return (BaseHook.afterSwap.selector, dynamicFeeDelta);
+    }
+
+    /// @notice Helper function to handle the existing Doppler afterSwap logic
+    /// @param key The pool key
+    /// @param swapParams The swap parameters
+    /// @param swapDelta The swap delta
+    function _handleExistingAfterSwapLogic(
+        PoolKey calldata key,
+        IPoolManager.SwapParams calldata swapParams,
+        BalanceDelta swapDelta
+    ) internal {
         // Get current tick
         PoolId poolId = key.toId();
         (uint160 sqrtPriceX96,, uint24 protocolFee, uint24 lpFee) = poolManager.getSlot0(poolId);
@@ -651,8 +634,6 @@ contract Doppler is BaseHook {
         }
 
         emit Swap(currentTick, state.totalProceeds, state.totalTokensSold);
-
-        return (BaseHook.afterSwap.selector, dynamicFeeDelta);
     }
 
     /// @notice Called by the poolManager immediately before liquidity is added
@@ -1490,16 +1471,6 @@ contract Doppler is BaseHook {
     /// @return rewards Rewards treasury address
     function getCurrentTreasuries() external view returns (address platform, address rewards) {
         return treasuryManager.getTreasuries();
-    }
-
-    /// @notice Decode hookData into MultiHopContext
-    /// @param hookData Encoded multi-hop context data
-    /// @return context Decoded multi-hop context
-    function _decodeHookData(bytes calldata hookData) private pure returns (MultiHopContext memory context) {
-        if (hookData.length == 0) {
-            return MultiHopContext(false, false);
-        }
-        return abi.decode(hookData, (MultiHopContext));
     }
 
     /// @inheritdoc BaseHook
