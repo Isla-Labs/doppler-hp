@@ -23,7 +23,13 @@ uint160 constant flagsDopplerHook = uint160(
         | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_DONATE_FLAG
 );
 
-uint160 constant flagsMigratorHook = uint160(Hooks.BEFORE_INITIALIZE_FLAG);
+uint160 constant flagsMigratorHook = uint160(
+    Hooks.BEFORE_INITIALIZE_FLAG | 
+    Hooks.BEFORE_SWAP_FLAG | 
+    Hooks.AFTER_SWAP_FLAG | 
+    Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | 
+    Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG
+);
 
 struct MineV4Params {
     address airlock;
@@ -41,13 +47,23 @@ struct MineV4MigratorHookParams {
     address poolManager;
     address migrator;
     address hookDeployer;
+    address treasuryManager;
+    address whitelistRegistry;
 }
 
 function mineV4MigratorHook(
     MineV4MigratorHookParams memory params
 ) view returns (bytes32, address) {
     bytes32 migratorHookInitHash = keccak256(
-        abi.encodePacked(type(UniswapV4MigratorHook).creationCode, abi.encode(params.poolManager, params.migrator))
+        abi.encodePacked(
+            type(UniswapV4MigratorHook).creationCode, 
+            abi.encode(
+                params.poolManager, 
+                params.migrator,
+                params.treasuryManager,
+                params.whitelistRegistry
+            )
+        )
     );
 
     for (uint256 salt; salt < 200_000; ++salt) {

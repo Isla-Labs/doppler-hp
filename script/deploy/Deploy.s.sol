@@ -31,6 +31,8 @@ import { LockableUniswapV3Initializer } from "src/LockableUniswapV3Initializer.s
 import { NoOpGovernanceFactory } from "src/NoOpGovernanceFactory.sol";
 import { NoOpMigrator } from "src/NoOpMigrator.sol";
 import { AirlockMultisig } from "test/shared/AirlockMultisig.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
 
 struct ScriptData {
     uint256 chainId;
@@ -43,6 +45,8 @@ struct ScriptData {
     address universalRouter;
     address stateView;
     address positionManager;
+    address platformTreasury;
+    address rewardsTreasury;
 }
 
 /**
@@ -70,7 +74,9 @@ abstract contract DeployScript is Script {
             DopplerDeployer dopplerDeployer,
             StreamableFeesLocker streamableFeesLocker,
             UniswapV4Migrator uniswapV4Migrator,
-            UniswapV4MigratorHook migratorHook
+            UniswapV4MigratorHook migratorHook,
+            WhitelistRegistry whitelistRegistry,
+            TreasuryManager treasuryManager
         ) = _deployDoppler(_scriptData);
 
         Bundler bundler = _deployBundler(_scriptData, airlock);
@@ -94,7 +100,9 @@ abstract contract DeployScript is Script {
             DopplerDeployer dopplerDeployer,
             StreamableFeesLocker streamableFeesLocker,
             UniswapV4Migrator uniswapV4Migrator,
-            UniswapV4MigratorHook migratorHook
+            UniswapV4MigratorHook migratorHook,
+            WhitelistRegistry whitelistRegistry,
+            TreasuryManager treasuryManager
         )
     {
         require(scriptData.uniswapV2Factory != address(0), "Cannot find UniswapV2Factory address!");
@@ -114,6 +122,16 @@ abstract contract DeployScript is Script {
         streamableFeesLocker =
             new StreamableFeesLocker(IPositionManager(_scriptData.positionManager), _scriptData.protocolOwner);
 
+        // Deploy WhitelistRegistry
+        whitelistRegistry = new WhitelistRegistry(msg.sender);
+
+        // Deploy TreasuryManager
+        treasuryManager = new TreasuryManager(
+            msg.sender,
+            _scriptData.platformTreasury,
+            _scriptData.rewardsTreasury
+        );
+
         // Pool Initializer Modules
         uniswapV3Initializer =
             new UniswapV3Initializer(address(airlock), IUniswapV3Factory(_scriptData.uniswapV3Factory));
@@ -128,6 +146,8 @@ abstract contract DeployScript is Script {
             MineV4MigratorHookParams({
                 poolManager: _scriptData.poolManager,
                 migrator: precomputedUniswapV4Migrator,
+                treasuryManager: address(treasuryManager),
+                whitelistRegistry: address(whitelistRegistry),
                 hookDeployer: 0x4e59b44847b379578588920cA78FbF26c0B4956C
             })
         );
@@ -142,7 +162,13 @@ abstract contract DeployScript is Script {
         );
 
         // Deploy hook with deployed migrator address
-        migratorHook = new UniswapV4MigratorHook{ salt: salt }(IPoolManager(_scriptData.poolManager), uniswapV4Migrator);
+        migratorHook = new UniswapV4MigratorHook{ salt: salt }(
+            IPoolManager(_scriptData.poolManager), 
+            uniswapV4Migrator,
+            treasuryManager,
+            whitelistRegistry
+        );
+
         dopplerDeployer = new DopplerDeployer(IPoolManager(_scriptData.poolManager));
         uniswapV4Initializer =
             new UniswapV4Initializer(address(airlock), IPoolManager(_scriptData.poolManager), dopplerDeployer);
@@ -171,7 +197,7 @@ abstract contract DeployScript is Script {
         );
 
         // Whitelisting the initial modules
-        address[] memory modules = new address[](7);
+        address[] memory modules = new address[](11);
         modules[0] = address(tokenFactory);
         modules[1] = address(uniswapV3Initializer);
         modules[2] = address(governanceFactory);
@@ -181,8 +207,10 @@ abstract contract DeployScript is Script {
         modules[6] = address(lockableUniswapV3Initializer);
         modules[7] = address(noOpGovernanceFactory);
         modules[8] = address(noOpMigrator);
+        modules[9] = address(whitelistRegistry);
+        modules[10] = address(treasuryManager);
 
-        ModuleState[] memory states = new ModuleState[](7);
+        ModuleState[] memory states = new ModuleState[](11);
         states[0] = ModuleState.TokenFactory;
         states[1] = ModuleState.PoolInitializer;
         states[2] = ModuleState.GovernanceFactory;
@@ -192,6 +220,8 @@ abstract contract DeployScript is Script {
         states[6] = ModuleState.PoolInitializer;
         states[7] = ModuleState.GovernanceFactory;
         states[8] = ModuleState.LiquidityMigrator;
+        states[9] = ModuleState.LiquidityMigrator;
+        states[10] = ModuleState.LiquidityMigrator;
 
         airlock.setModuleState(modules, states);
 

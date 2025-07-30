@@ -16,7 +16,9 @@ contract DeployBaseSepolia is DeployScript {
             uniswapV3Factory: 0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24,
             universalRouter: 0x492E6456D9528771018DeB9E87ef7750EF184104,
             stateView: 0x571291b572ed32ce6751a2Cb2486EbEe8DEfB9B4,
-            positionManager: 0x4B2C77d209D3405F41a037Ec6c77F7F5b8e2ca80
+            positionManager: 0x4B2C77d209D3405F41a037Ec6c77F7F5b8e2ca80,
+            platformTreasury: 0xAa9eB4C3d3DD5F3F10DF00dE7A8D63266B497810,
+            rewardsTreasury: 0xd432a083Ecf69D57A889F4B46DF1b644Bc2a1671
         });
     }
 }

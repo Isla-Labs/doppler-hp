@@ -9,6 +9,8 @@ import { Airlock } from "src/Airlock.sol";
 import { IPoolManager, IHooks } from "@v4-core/interfaces/IPoolManager.sol";
 import { PositionManager } from "@v4-periphery/PositionManager.sol";
 import { MineV4MigratorHookParams, mineV4MigratorHook } from "test/shared/AirlockMiner.sol";
+import { TreasuryManager } from "src/TreasuryManager.sol";
+import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
 
 struct ScriptData {
     address airlock;
@@ -16,6 +18,8 @@ struct ScriptData {
     address positionManager;
     address create2Factory;
     address streamableFeesLocker;
+    address platformTreasury;
+    address rewardsTreasury;
 }
 
 /**
@@ -35,6 +39,16 @@ abstract contract DeployV4MigratorOnlyScript is Script {
 
         vm.startBroadcast();
 
+        // Deploy WhitelistRegistry
+        WhitelistRegistry whitelistRegistry = new WhitelistRegistry(msg.sender);
+
+        // Deploy TreasuryManager
+        TreasuryManager treasuryManager = new TreasuryManager(
+            msg.sender,
+            _scriptData.platformTreasury,
+            _scriptData.rewardsTreasury
+        );
+
         // Using `CREATE` we can pre-compute the UniswapV4Migrator address for mining the hook address
         address precomputedUniswapV4Migrator = vm.computeCreateAddress(msg.sender, vm.getNonce(msg.sender));
 
@@ -43,6 +57,8 @@ abstract contract DeployV4MigratorOnlyScript is Script {
             MineV4MigratorHookParams({
                 poolManager: _scriptData.poolManager,
                 migrator: precomputedUniswapV4Migrator,
+                treasuryManager: address(treasuryManager),
+                whitelistRegistry: address(whitelistRegistry),
                 hookDeployer: _scriptData.create2Factory
             })
         );
@@ -57,8 +73,12 @@ abstract contract DeployV4MigratorOnlyScript is Script {
         );
 
         // Deploy hook with deployed migrator address
-        UniswapV4MigratorHook migratorHook =
-            new UniswapV4MigratorHook{ salt: salt }(IPoolManager(_scriptData.poolManager), uniswapV4Migrator);
+        UniswapV4MigratorHook migratorHook = new UniswapV4MigratorHook{ salt: salt }(
+            IPoolManager(_scriptData.poolManager), 
+            uniswapV4Migrator,
+            treasuryManager,
+            whitelistRegistry
+        );
 
         /// Verify that the hook was set correctly in the UniswapV4Migrator constructor
         require(
@@ -77,7 +97,9 @@ contract DeployV4MigratorOnlyBaseSepoliaScript is DeployV4MigratorOnlyScript {
             poolManager: 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408,
             positionManager: 0x4B2C77d209D3405F41a037Ec6c77F7F5b8e2ca80,
             create2Factory: 0x4e59b44847b379578588920cA78FbF26c0B4956C,
-            streamableFeesLocker: 0x3345E557c5C0b474bE1eb4693264008B8562Aa9c
+            streamableFeesLocker: 0x3345E557c5C0b474bE1eb4693264008B8562Aa9c,
+            platformTreasury: 0xAa9eB4C3d3DD5F3F10DF00dE7A8D63266B497810,
+            rewardsTreasury: 0xd432a083Ecf69D57A889F4B46DF1b644Bc2a1671
         });
     }
 }
@@ -89,7 +111,9 @@ contract DeployV4MigratorOnlyBaseScript is DeployV4MigratorOnlyScript {
             poolManager: 0x498581fF718922c3f8e6A244956aF099B2652b2b,
             positionManager: 0x7C5f5A4bBd8fD63184577525326123B519429bDc,
             create2Factory: 0x4e59b44847b379578588920cA78FbF26c0B4956C,
-            streamableFeesLocker: 0x0A00775D71a42cd33D62780003035e7F5b47bD3A
+            streamableFeesLocker: 0x0A00775D71a42cd33D62780003035e7F5b47bD3A,
+            platformTreasury: 0xAa9eB4C3d3DD5F3F10DF00dE7A8D63266B497810,
+            rewardsTreasury: 0xd432a083Ecf69D57A889F4B46DF1b644Bc2a1671
         });
     }
 }
