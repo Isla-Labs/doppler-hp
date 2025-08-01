@@ -3,15 +3,15 @@ pragma solidity ^0.8.24;
 
 import { BaseHook } from "@v4-periphery/utils/BaseHook.sol";
 import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
+import { AggregatorV3Interface } from "src/interfaces/AggregatorV3Interface.sol";
 import { Hooks } from "@v4-core/libraries/Hooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@v4-core/types/PoolId.sol";
 import { BeforeSwapDelta, toBeforeSwapDelta } from "@v4-core/types/BeforeSwapDelta.sol";
 import { BalanceDelta } from "@v4-core/types/BalanceDelta.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
-import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
 import { SD59x18, exp, sd } from "@prb/math/src/SD59x18.sol";
-import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
 import { TreasuryManager } from "src/TreasuryManager.sol";
 import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
 
@@ -32,11 +32,6 @@ error ZeroAddress();
 
 /// @notice Thrown when sender is not whitelisted
 error NotWhitelisted();
-
-/// @notice Oracle errors
-error EthPriceFetchFailed();
-error ChainlinkPriceStale();
-error ChainlinkPriceInvalid();
 
 /**
  * @title Uniswap V4 Migrator Hook with Dynamic Fees
@@ -68,7 +63,7 @@ contract UniswapV4MigratorHook is BaseHook {
     
     /// @notice Oracle validation constants
     uint256 internal constant MAX_STALENESS = 3600; // 1 hour
-    uint256 internal constant FALLBACK_ETH_PRICE_USD = 2500000000; // (6 decimals) Bypass oracle downtime
+    uint256 public fallbackEthPriceUsd = 2500000000; // (6 decimals)
 
     /// @notice Dynamic fee constants
     uint256 internal constant FEE_START_TIER_1 = 500;
@@ -85,13 +80,8 @@ contract UniswapV4MigratorHook is BaseHook {
     uint256 internal constant TIER_3_THRESHOLD_USD = 50000;
     uint256 internal constant SCALE_PARAMETER = 1000;
 
-    // ==========================================
-    // EVENTS
-    // ==========================================
-
-    event EthPriceCalculated(uint256 ethPriceUsd, uint256 timestamp, string method);
-    event ChainlinkPriceUsed(uint256 ethPriceUsd, uint256 timestamp);
-    event FallbackUsed(uint256 emergencyPrice, string reason);
+    error NotAllowed();
+    error InvalidPrice();
 
     // ==========================================
     // MODIFIERS
@@ -108,6 +98,18 @@ contract UniswapV4MigratorHook is BaseHook {
         if (!whitelistRegistry.isTransferAllowed(sender)) revert NotWhitelisted();
         _;
     }
+
+    /// @notice Modifier to ensure the caller is admin for update function
+    modifier onlyAdmin(address sender) {
+        if (!whitelistRegistry.hasAdminAccess(sender)) revert NotAllowed();
+        _;
+    }
+
+    // ==========================================
+    // EVENTS
+    // ==========================================
+
+    event FallbackPriceUpdated(uint256 newPrice, address indexed updatedBy);
 
     // ==========================================
     // CONSTRUCTOR
@@ -254,7 +256,15 @@ contract UniswapV4MigratorHook is BaseHook {
     /// @dev For swaps (failed price fetch doesn't interfere with execution)
     /// @return ethPriceUsd ETH price in USD (6 decimal precision)
     function _fetchEthPriceWithFallback() internal view returns (uint256 ethPriceUsd) {
-        // Chainlink ETH-USD on Base
+        // Chain ID constants
+        uint256 BASE_MAINNET = 8453;
+        
+        // Skip Chainlink on testnets - use fallback price directly
+        if (block.chainid != BASE_MAINNET) {
+            return fallbackEthPriceUsd;
+        }
+        
+        // Only use Chainlink on Base mainnet
         try AggregatorV3Interface(CHAINLINK_ETH_USD_FEED).latestRoundData() returns (
             uint80, int256 answer, uint256, uint256 updatedAt, uint80
         ) {
@@ -265,8 +275,8 @@ contract UniswapV4MigratorHook is BaseHook {
             }
         } catch {}
         
-        // Bypass oracle failure to keep swaps functional
-        return FALLBACK_ETH_PRICE_USD;
+        // Fallback for mainnet oracle failures
+        return fallbackEthPriceUsd;
     }
 
     /// @notice Calculate dynamic fee with exponential decay
@@ -281,7 +291,7 @@ contract UniswapV4MigratorHook is BaseHook {
         uint256 volumeDiff = volumeUsd > vStartUsd ? volumeUsd - vStartUsd : 0;
         uint256 exponent = (alpha * volumeDiff) / SCALE_PARAMETER;
         
-        uint256 expValue = _calculateExponentialDecayPRB(exponent);
+        uint256 expValue = _calculateExponentialDecay(exponent);
         
         uint256 feeRange = feeStart - FEE_MIN_BPS;
         uint256 dynamicComponent = (feeRange * expValue) / 1 ether;
@@ -305,9 +315,12 @@ contract UniswapV4MigratorHook is BaseHook {
     }
 
     /// @notice Calculate e^(-x)
-    function _calculateExponentialDecayPRB(uint256 x) internal pure returns (uint256) {
-        if (x == 0) return 1 ether;
-        if (x >= 10000) return 0;
+    /// @dev Calculates e^(-x/1000) with 18-decimal precision
+    /// @param x Input value (will be divided by 1000 in calculation)
+    /// @return result e^(-x/1000) scaled by 1e18
+    function _calculateExponentialDecay(uint256 x) internal pure returns (uint256) {
+        if (x == 0) return 1 ether; // e^0 = 1
+        if (x >= 10000) return 0;   // e^-10 ≈ 0, return 0 for extreme values
         
         SD59x18 negativeX = sd(-int256(x)) / sd(1000);
         SD59x18 result = exp(negativeX);
@@ -327,6 +340,17 @@ contract UniswapV4MigratorHook is BaseHook {
             return MultiHopContext(false, false); // Single hop default
         }
         return abi.decode(hookData, (MultiHopContext));
+    }
+
+    /// @notice Update fallback ETH price (admin only)
+    /// @param newPrice New fallback price in USD (6 decimals)
+    function updateFallbackPrice(uint256 newPrice) external onlyAdmin(msg.sender) {
+        if (newPrice == 0 || newPrice > 100_000_000_000) revert InvalidPrice();
+        
+        uint256 oldPrice = fallbackEthPriceUsd;
+        fallbackEthPriceUsd = newPrice;
+        
+        emit FallbackPriceUpdated(newPrice, msg.sender);
     }
 
     // ==========================================

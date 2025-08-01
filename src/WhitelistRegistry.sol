@@ -13,11 +13,20 @@ contract WhitelistRegistry is Ownable2Step {
     
     /// @notice HP smart accounts
     mapping(address => bool) public isPlatformAccount;
+
+    /// @notice Admin accounts that can update system parameters
+    mapping(address => bool) public isAdmin;
     
     event PlatformAccountAdded(address indexed account);
+    event AdminAdded(address indexed admin);
+    event AdminRemoved(address indexed admin);
     
     constructor(address _owner) Ownable(_owner) {}
 
+    // ==========================================
+    // UPDATE FUNCTIONS
+    // ==========================================
+    
     function addPlatformAccount(address account) external onlyOwner {
         require(account != address(0), "Zero address");
         require(!isPlatformAccount[account], "Already whitelisted");
@@ -37,8 +46,31 @@ contract WhitelistRegistry is Ownable2Step {
             }
         }
     }
+
+    function addAdmin(address admin) external onlyOwner {
+        require(admin != address(0), "Zero address");
+        require(!isAdmin[admin], "Already admin");
+        
+        isAdmin[admin] = true;
+        emit AdminAdded(admin);
+    }
+    
+    function removeAdmin(address admin) external onlyOwner {
+        require(isAdmin[admin], "Not admin");
+        
+        isAdmin[admin] = false;
+        emit AdminRemoved(admin);
+    }
+
+    // ==========================================
+    // CHECKER FUNCTIONS
+    // ==========================================
     
     function isTransferAllowed(address account) external view returns (bool) {
         return isPlatformAccount[account];
+    }
+    
+    function hasAdminAccess(address account) external view returns (bool) {
+        return isAdmin[account];
     }
 }

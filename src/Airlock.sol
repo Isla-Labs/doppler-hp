@@ -141,7 +141,7 @@ contract Airlock is Ownable {
      */
     function create(
         CreateParams calldata createData
-    ) external returns (address asset, address pool, address governance, address timelock, address migrationPool) {
+    ) external onlyOwner returns (address asset, address pool, address governance, address timelock, address migrationPool) {
         _validateModuleState(address(createData.tokenFactory), ModuleState.TokenFactory);
         _validateModuleState(address(createData.governanceFactory), ModuleState.GovernanceFactory);
         _validateModuleState(address(createData.poolInitializer), ModuleState.PoolInitializer);
@@ -192,7 +192,7 @@ contract Airlock is Ownable {
      */
     function migrate(
         address asset
-    ) external {
+    ) external onlyOwner {
         AssetData memory assetData = getAssetData[asset];
 
         DERC20(asset).unlockPool();
@@ -294,7 +294,7 @@ contract Airlock is Ownable {
      * @param token Address of the token to collect fees from
      * @param amount Amount of fees to collect
      */
-    function collectIntegratorFees(address to, address token, uint256 amount) external {
+    function collectIntegratorFees(address to, address token, uint256 amount) external onlyOwner {
         getIntegratorFees[msg.sender][token] -= amount;
 
         if (token == address(0)) {
