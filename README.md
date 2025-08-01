@@ -4,7 +4,7 @@ This repository contains the [Doppler](https://github.com/whetstoneresearch/dopp
 
 ## Deployments
 
-Latest deployments can be found [here](./Deployments.md). For historical deployments, you can check the [deployments](./deployments/) folder, which contains the deployment logs for each network.
+Latest deployments can be found [here](./Deployments.md). Historical deployment logs for Base and Base Sepolia can be found in the [deployments](./deployments/) folder.
 
 ## Attribution
 
