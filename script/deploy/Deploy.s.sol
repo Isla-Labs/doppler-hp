@@ -33,6 +33,8 @@ import { NoOpMigrator } from "src/NoOpMigrator.sol";
 import { AirlockMultisig } from "test/shared/AirlockMultisig.sol";
 import { TreasuryManager } from "src/TreasuryManager.sol";
 import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
+import { ITreasuryManager } from "src/interfaces/ITreasuryManager.sol";
+import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
 struct ScriptData {
     uint256 chainId;
@@ -165,8 +167,8 @@ abstract contract DeployScript is Script {
         migratorHook = new UniswapV4MigratorHook{ salt: salt }(
             IPoolManager(_scriptData.poolManager), 
             uniswapV4Migrator,
-            treasuryManager,
-            whitelistRegistry
+            ITreasuryManager(address(treasuryManager)),
+            IWhitelistRegistry(address(whitelistRegistry))
         );
 
         dopplerDeployer = new DopplerDeployer(IPoolManager(_scriptData.poolManager));

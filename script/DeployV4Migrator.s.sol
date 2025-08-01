@@ -11,6 +11,8 @@ import { IPositionManager, PositionManager } from "@v4-periphery/PositionManager
 import { MineV4MigratorHookParams, mineV4MigratorHook } from "test/shared/AirlockMiner.sol";
 import { TreasuryManager } from "src/TreasuryManager.sol";
 import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
+import { ITreasuryManager } from "src/interfaces/ITreasuryManager.sol";
+import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
 struct ScriptData {
     address airlock;
@@ -76,8 +78,8 @@ abstract contract DeployV4MigratorScript is Script {
         UniswapV4MigratorHook migratorHook = new UniswapV4MigratorHook{ salt: salt }(
             IPoolManager(_scriptData.poolManager), 
             uniswapV4Migrator,
-            treasuryManager,
-            whitelistRegistry
+            ITreasuryManager(address(treasuryManager)),
+            IWhitelistRegistry(address(whitelistRegistry))
         );
 
         /// Verify that the hook was set correctly in the UniswapV4Migrator constructor

@@ -29,7 +29,6 @@ contract TreasuryManager is Ownable2Step {
     event FeesDistributed(
         address indexed hook,
         address indexed trader,
-        bool indexed isBuy,
         Currency currency,
         uint256 totalAmount,
         uint256 rewardsAmount,
@@ -66,16 +65,14 @@ contract TreasuryManager is Ownable2Step {
     
     /// @notice Distribute fees between treasuries
     /// @param poolManager The Uniswap V4 pool manager
+    /// @param trader Address of the trader (for events)
     /// @param currency The currency to distribute
     /// @param totalAmount Total fee amount to distribute
-    /// @param trader Address of the trader (for events)
-    /// @param isBuy Whether this was a buy transaction (for events)
     function distributeFees(
         IPoolManager poolManager,
-        Currency currency,
-        uint256 totalAmount,
         address trader,
-        bool isBuy
+        Currency currency,
+        uint256 totalAmount
     ) external {
         // Calculate splits
         uint256 rewardsAmount = (totalAmount * REWARDS_TREASURY_BPS) / 10000;
@@ -86,9 +83,8 @@ contract TreasuryManager is Ownable2Step {
         poolManager.take(currency, platformTreasury, platformAmount);
         
         emit FeesDistributed(
-            msg.sender, // The calling hook contract
+            msg.sender, // The calling hook
             trader,
-            isBuy,
             currency,
             totalAmount,
             rewardsAmount,

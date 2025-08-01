@@ -12,8 +12,8 @@ import { BalanceDelta } from "@v4-core/types/BalanceDelta.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { SD59x18, exp, sd } from "@prb/math/src/SD59x18.sol";
 import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
-import { TreasuryManager } from "src/TreasuryManager.sol";
-import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
+import { ITreasuryManager } from "src/interfaces/ITreasuryManager.sol";
+import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
 /// @notice Context for multi-hop swap coordination
 /// @dev Disables double-fee collection during Player Token -> Player Token swaps
@@ -49,17 +49,17 @@ contract UniswapV4MigratorHook is BaseHook {
     address public immutable migrator;
 
     /// @notice Treasury manager for centralized fee distribution
-    TreasuryManager public treasuryManager;
+    ITreasuryManager public treasuryManager;
 
     /// @notice Whitelist registry for platform account verification
-    WhitelistRegistry public whitelistRegistry;
+    IWhitelistRegistry public whitelistRegistry;
 
     // ==========================================
     // DYNAMIC FEE CONSTANTS
     // ==========================================
 
     /// @notice Chainlink ETH-USD price feed on Base
-    address internal constant CHAINLINK_ETH_USD_FEED = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
+    address public CHAINLINK_ETH_USD = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
     
     /// @notice Oracle validation constants
     uint256 internal constant MAX_STALENESS = 3600; // 1 hour
@@ -110,6 +110,7 @@ contract UniswapV4MigratorHook is BaseHook {
     // ==========================================
 
     event FallbackPriceUpdated(uint256 newPrice, address indexed updatedBy);
+    event OracleAddressUpdated(address indexed newOracle, address indexed updatedBy);
 
     // ==========================================
     // CONSTRUCTOR
@@ -123,8 +124,8 @@ contract UniswapV4MigratorHook is BaseHook {
     constructor(
         IPoolManager manager, 
         UniswapV4Migrator migrator_,
-        TreasuryManager _treasuryManager,
-        WhitelistRegistry _whitelistRegistry
+        ITreasuryManager _treasuryManager,
+        IWhitelistRegistry _whitelistRegistry
     ) BaseHook(manager) {
         migrator = address(migrator_);
         
@@ -182,10 +183,9 @@ contract UniswapV4MigratorHook is BaseHook {
                 // Distribute fees via Treasury Manager
                 treasuryManager.distributeFees(
                     poolManager,
-                    key.currency0,
-                    totalFeeAmount,
                     sender,
-                    true // isBuy
+                    key.currency0,
+                    totalFeeAmount
                 );
                 
                 // Return delta to account for fees taken
@@ -234,10 +234,9 @@ contract UniswapV4MigratorHook is BaseHook {
                 // Distribute fees via Treasury Manager
                 treasuryManager.distributeFees(
                     poolManager,
-                    key.currency0,
-                    totalFeeAmount,
                     sender,
-                    false // isSell
+                    key.currency0,
+                    totalFeeAmount
                 );
                 
                 // Return delta to account for fees taken
@@ -265,7 +264,7 @@ contract UniswapV4MigratorHook is BaseHook {
         }
         
         // Only use Chainlink on Base mainnet
-        try AggregatorV3Interface(CHAINLINK_ETH_USD_FEED).latestRoundData() returns (
+        try AggregatorV3Interface(CHAINLINK_ETH_USD).latestRoundData() returns (
             uint80, int256 answer, uint256, uint256 updatedAt, uint80
         ) {
             // Check if price is stale or invalid
@@ -342,15 +341,27 @@ contract UniswapV4MigratorHook is BaseHook {
         return abi.decode(hookData, (MultiHopContext));
     }
 
-    /// @notice Update fallback ETH price (admin only)
-    /// @param newPrice New fallback price in USD (6 decimals)
-    function updateFallbackPrice(uint256 newPrice) external onlyAdmin(msg.sender) {
-        if (newPrice == 0 || newPrice > 100_000_000_000) revert InvalidPrice();
+    /// @notice Update oracle
+    /// @param newOracleAddress Oracle address (address(0) = no change)
+    /// @param newFallbackPrice Fallback price in USD (0 = no change)
+    function updateOracle(
+        address newOracleAddress, 
+        uint256 newFallbackPrice
+    ) external onlyAdmin(msg.sender) {
         
-        uint256 oldPrice = fallbackEthPriceUsd;
-        fallbackEthPriceUsd = newPrice;
+        // Update oracle address if provided
+        if (newOracleAddress != address(0)) {
+            address oldOracle = CHAINLINK_ETH_USD;
+            CHAINLINK_ETH_USD = newOracleAddress;
+            emit OracleAddressUpdated(newOracleAddress, msg.sender);
+        }
         
-        emit FallbackPriceUpdated(newPrice, msg.sender);
+        // Update fallback price if provided
+        if (newFallbackPrice != 0) {
+            uint256 oldPrice = fallbackEthPriceUsd;
+            fallbackEthPriceUsd = newFallbackPrice;
+            emit FallbackPriceUpdated(newFallbackPrice, msg.sender);
+        }
     }
 
     // ==========================================
@@ -390,7 +401,7 @@ contract UniswapV4MigratorHook is BaseHook {
         view 
         returns (uint256 feeBps, uint256 ethPriceUsd)
     {
-        ethPriceUsd = _fetchEthPriceWithFallback();
+        ethPriceUsd = _fetchEthPriceWithFallback(); // Display execution price (6 decimals)
         feeBps = _calculateDynamicFee(volumeEth, ethPriceUsd);
     }
 }
