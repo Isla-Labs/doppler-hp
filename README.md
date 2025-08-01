@@ -1,6 +1,6 @@
 # Doppler-HP
 
-This repository contains the [Doppler](https://github.com/whetstoneresearch/doppler/blob/main/docs/Doppler.md) Protocol along with the [Airlock](https://github.com/Isla-Labs/doppler-hp/blob/main/docs/Airlock.md) contracts, and production modifications made by Isla Labs for [HighPotential](https://epl.highpotential.io/). You can learn more about the technical aspects of Doppler in the protocol’s [documentation](https://docs.doppler.lol/) or read their [whitepaper](https://github.com/whetstoneresearch/docs/blob/main/whitepapers/doppler/Dutch_auction_Dynamic_Bonding_Curves.pdf).
+This repository contains the [Doppler](https://github.com/whetstoneresearch/doppler/blob/main/docs/Doppler.md) Protocol and the production modifications made by Isla Labs for [HighPotential](https://epl.highpotential.io/). You can learn more about the technical aspects of Doppler in the protocol’s [documentation](https://docs.doppler.lol/) or [whitepaper](https://github.com/whetstoneresearch/docs/blob/main/whitepapers/doppler/Dutch_auction_Dynamic_Bonding_Curves.pdf).
 
 ## Deployments
 
