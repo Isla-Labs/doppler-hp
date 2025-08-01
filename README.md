@@ -1,6 +1,6 @@
 # Doppler-HP
 
-This repository contains the [Doppler](https://github.com/whetstoneresearch/doppler/blob/main/docs/Doppler.md) Protocol and the production modifications made by Isla Labs for [HighPotential](https://epl.highpotential.io/). You can learn more about the technical aspects of Doppler in the protocol’s [documentation](https://docs.doppler.lol/) or [whitepaper](https://github.com/whetstoneresearch/docs/blob/main/whitepapers/doppler/Dutch_auction_Dynamic_Bonding_Curves.pdf).
+This repository contains the [Doppler](https://github.com/whetstoneresearch/doppler/blob/main/docs/Doppler.md) Protocol and the production modifications made by Isla Labs for [HighPotential](https://epl.highpotential.io/).
 
 ## Deployments
 
@@ -8,7 +8,7 @@ Latest deployments can be found [here](./Deployments.md). For historical deploym
 
 ## Attribution
 
-You can find the latest Doppler architecture at [WhetstoneResearch](https://github.com/whetstoneresearch). This repository is a forked version that contains modifications that are specific to HighPotential’s use case. For the composable repository, we recommend visiting the canonical [Doppler](https://github.com/whetstoneresearch/doppler) version.
+You can learn more about the technical aspects of Doppler in their [documentation](https://docs.doppler.lol/) or [whitepaper](https://github.com/whetstoneresearch/docs/blob/main/whitepapers/doppler/Dutch_auction_Dynamic_Bonding_Curves.pdf). This repository is a forked version of the Doppler protocol that contains modifications that are specific to HighPotential’s use case. For the composable repository, we recommend visiting the canonical [Doppler](https://github.com/whetstoneresearch/doppler) version.
 
 ## Contact
 
