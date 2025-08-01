@@ -1,73 +1,17 @@
-# Doppler
+# Doppler-HP
 
-[![Test](https://github.com/whetstoneresearch/doppler/actions/workflows/test.yml/badge.svg)](https://github.com/whetstoneresearch/doppler/actions/workflows/test.yml)
-
-This reposity contains the [Doppler](docs/Doppler.md) Protocol along with the [Airlock](/docs/Airlock.md) contracts You can learn more about the technical aspects in the [documentation](https://docs.doppler.lol).
+This repository contains the [Doppler](https://github.com/whetstoneresearch/doppler/blob/main/docs/Doppler.md) Protocol along with the [Airlock](https://github.com/Isla-Labs/doppler-hp/blob/main/docs/Airlock.md) contracts, and production modifications made by Isla Labs for [HighPotential](https://epl.highpotential.io/). You can learn more about the technical aspects of Doppler in the protocol’s [documentation](https://docs.doppler.lol/) or read their [whitepaper](https://github.com/whetstoneresearch/docs/blob/main/whitepapers/doppler/Dutch_auction_Dynamic_Bonding_Curves.pdf).
 
 ## Deployments
 
-Latest deployments can be found [here](./Deployments.md), which is a mirror of the [documentation page](https://docs.doppler.lol/resources/contract-addresses). For historical deployments, you can check the [deployments](./deployments/) folder, which contains the deployment logs for each network.
+Latest deployments can be found [here](./Deployments.md). For historical deployments, you can check the [deployments](./deployments/) folder, which contains the deployment logs for each network.
 
-## Usage
+## Attribution
 
-### Installation
+You can find the latest Doppler architecture at [WhetstoneResearch](https://github.com/whetstoneresearch). This repository is a forked version that contains modifications that are specific to HighPotential’s use case. For the composable repository, we recommend visiting the canonical [Doppler](https://github.com/whetstoneresearch/doppler) version.
 
-First, you will need to install [Foundry](https://book.getfoundry.sh/getting-started/installation) if you don't already have it. Then, run the following commands:
+## Contact
 
-```shell
-# Clone the repository
-$ git clone git@github.com:whetstoneresearch/doppler.git
+The primary security contact for Doppler-HP is admin@islalabs.co.
 
-# Install the dependencies
-$ make install
-```
-
-### Testing
-
-```shell
-# Copy the example a .env file and fill the RPC endpoints
-$ cp .env.example .env
-
-# Then run the tests
-$ make test
-
-# You can also only run the invariant tests
-$ make fuzz
-
-# And even run longer fuzz tests
-$ make deep-fuzz
-```
-
-Tests can be tweaked from the `.env` file, this is a nice way to try different testing scenarios without recompiling the contracts:
-
-```shell
-IS_TOKEN_0=FALSE
-USING_ETH=FALSE
-FEE=30
-```
-
-### Deploying
-
-Deployment scripts are provided to either deploy the whole protocol or only some specific modules, if you find them in the [script](/script) folder. Note that you will also need to install [Bun](https://bun.sh/), as some internal scripts are written in TypeScript to update the deploment logs and the documentation.
-
-Then make sure to set the required environment variables in the `.env` file before running the deployment scripts, once you're done, you can run the following command to deploy the contracts:
-
-```shell
-# Deploy the protocol on Base
-make deploy-base
-
-# Deploy the protocol on Unichain
-make deploy-unichain
-
-# Deploy the protocol on Ink
-make deploy-ink
-
-# Deploy V4 support on Base
-make deploy-v4-base
-
-# Deploy V4 support on Unichain
-make deploy-v4-unichain
-
-# Deploy V4 support on Ink
-make deploy-v4-ink
-```
+You can also reach out via [Discord](https://discord.gg/qxaWCHaSsG) with any questions, or ask [QuantumBalr](https://epl.highpotential.io/quantumbalr) for comprehensive insights into HighPotential functionality.
