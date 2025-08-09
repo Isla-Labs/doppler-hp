@@ -93,12 +93,6 @@ contract UniswapV4MigratorHook is BaseHook {
         _;
     }
 
-    /// @notice Modifier to ensure the sender is whitelisted
-    modifier onlyWhitelisted(address sender) {
-        if (!whitelistRegistry.isTransferAllowed(sender)) revert NotWhitelisted();
-        _;
-    }
-
     /// @notice Modifier to ensure the caller is admin for update function
     modifier onlyAdmin(address sender) {
         if (!whitelistRegistry.hasAdminAccess(sender)) revert NotAllowed();
@@ -157,12 +151,7 @@ contract UniswapV4MigratorHook is BaseHook {
         PoolKey calldata key,
         IPoolManager.SwapParams calldata swapParams,
         bytes calldata hookData
-    ) internal override onlyWhitelisted(sender) returns (bytes4, BeforeSwapDelta, uint24) {
-
-        // Check if sender is whitelisted
-        if (!whitelistRegistry.isTransferAllowed(sender)) {
-            revert NotWhitelisted();
-        }
+    ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
         
         // Check direction (ETH → Player Token)
         bool isBuy = swapParams.zeroForOne;

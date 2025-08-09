@@ -59,3 +59,13 @@ deploy-base-sepolia:
 deploy-unichain-sepolia:
 	@forge script ./script/deploy/DeployUnichainSepolia.s.sol --private-key $(PRIVATE_KEY) --rpc-url $(UNICHAIN_SEPOLIA_RPC_URL) --verify --etherscan-api-key ${UNISCAN_API_KEY} --broadcast --slow
 	$(MAKE) generate-history
+
+# Staked token factory deployments
+
+deploy-staked-token-factory-base:
+	@forge script ./script/DeployStakedTokenFactory.s.sol:DeployStakedTokenFactoryBaseMainnetScript --private-key $(PRIVATE_KEY) --rpc-url $(BASE_MAINNET_RPC_URL) --verify --etherscan-api-key ${BASESCAN_API_KEY} --broadcast --slow
+	$(MAKE) generate-history
+
+deploy-staked-token-factory-base-sepolia:
+	@forge script ./script/DeployStakedTokenFactory.s.sol:DeployStakedTokenFactoryBaseSepoliaScript --private-key $(PRIVATE_KEY) --rpc-url $(BASE_SEPOLIA_RPC_URL) --verify --etherscan-api-key ${BASESCAN_API_KEY} --broadcast --slow
+	$(MAKE) generate-history

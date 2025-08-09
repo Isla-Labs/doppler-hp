@@ -24,10 +24,19 @@ contract WhitelistRegistry is Ownable2Step {
     constructor(address _owner) Ownable(_owner) {}
 
     // ==========================================
+    // MODIFIERS
+    // ==========================================
+    
+    modifier onlyAdmin() {
+        require(isAdmin[msg.sender] || msg.sender == owner(), "Not admin or owner");
+        _;
+    }
+
+    // ==========================================
     // UPDATE FUNCTIONS
     // ==========================================
     
-    function addPlatformAccount(address account) external onlyOwner {
+    function addPlatformAccount(address account) external onlyAdmin {
         require(account != address(0), "Zero address");
         require(!isPlatformAccount[account], "Already whitelisted");
         
@@ -35,7 +44,7 @@ contract WhitelistRegistry is Ownable2Step {
         emit PlatformAccountAdded(account);
     }
     
-    function batchAddPlatformAccounts(address[] calldata accounts) external onlyOwner {
+    function batchAddPlatformAccounts(address[] calldata accounts) external onlyAdmin {
         for (uint256 i = 0; i < accounts.length; i++) {
             address account = accounts[i];
             require(account != address(0), "Zero address");
@@ -67,7 +76,7 @@ contract WhitelistRegistry is Ownable2Step {
     // ==========================================
     
     function isTransferAllowed(address account) external view returns (bool) {
-        return isPlatformAccount[account];
+        return true;
     }
     
     function hasAdminAccess(address account) external view returns (bool) {

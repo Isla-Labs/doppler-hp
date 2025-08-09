@@ -7,8 +7,8 @@ import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 
 /**
- * @title HighPotential Treasury Manager
- * @notice Centralized treasury management for all HP hook contracts
+ * @title Treasury Manager
+ * @notice Treasury management for HP hooks
  * @dev Single source of truth for fee distribution across all hooks
  */
 contract TreasuryManager is Ownable2Step {
@@ -19,6 +19,9 @@ contract TreasuryManager is Ownable2Step {
     /// @notice Treasury receiving 89% of dynamic fee output
     address public rewardsTreasury;
     
+    /// @notice Registered hooks that can distribute fees
+    mapping(address => bool) public authorizedHooks;
+    
     /// @notice Rewards treasury allocation percentage (89% = 8900 basis points)
     uint256 public constant REWARDS_TREASURY_BPS = 8900;
     
@@ -26,6 +29,7 @@ contract TreasuryManager is Ownable2Step {
     uint256 public constant PLATFORM_TREASURY_BPS = 1100;
     
     event TreasuryUpdated(address indexed newPlatformTreasury, address indexed newRewardsTreasury);
+    event HookAuthorized(address indexed hook);
     event FeesDistributed(
         address indexed hook,
         address indexed trader,
@@ -36,13 +40,20 @@ contract TreasuryManager is Ownable2Step {
     );
     
     error ZeroAddress();
+    error AlreadyAuthorized();
+    error NotAuthorized();
+    
+    modifier onlyAuthorizedHook() {
+        if (!authorizedHooks[msg.sender]) revert NotAuthorized();
+        _;
+    }
     
     constructor(
         address _initialOwner,
         address _platformTreasury,
         address _rewardsTreasury
     ) Ownable(_initialOwner) {
-        require(_platformTreasury != address(0) && _rewardsTreasury != address(0), ZeroAddress());
+        if (_platformTreasury == address(0) || _rewardsTreasury == address(0)) revert ZeroAddress();
         
         platformTreasury = _platformTreasury;
         rewardsTreasury = _rewardsTreasury;
@@ -55,7 +66,7 @@ contract TreasuryManager is Ownable2Step {
         address _newPlatformTreasury,
         address _newRewardsTreasury
     ) external onlyOwner {
-        require(_newPlatformTreasury != address(0) && _newRewardsTreasury != address(0), ZeroAddress());
+        if (_newPlatformTreasury == address(0) || _newRewardsTreasury == address(0)) revert ZeroAddress();
         
         platformTreasury = _newPlatformTreasury;
         rewardsTreasury = _newRewardsTreasury;
@@ -63,7 +74,16 @@ contract TreasuryManager is Ownable2Step {
         emit TreasuryUpdated(_newPlatformTreasury, _newRewardsTreasury);
     }
     
-    /// @notice Distribute fees between treasuries
+    /// @notice Add authorized hook (only owner)
+    function addAuthorizedHook(address hook) external onlyOwner {
+        if (hook == address(0)) revert ZeroAddress();
+        if (authorizedHooks[hook]) revert AlreadyAuthorized();
+        
+        authorizedHooks[hook] = true;
+        emit HookAuthorized(hook);
+    }
+    
+    /// @notice Distribute fees between treasuries (only authorized hooks)
     /// @param poolManager The Uniswap V4 pool manager
     /// @param trader Address of the trader (for events)
     /// @param currency The currency to distribute
@@ -73,7 +93,7 @@ contract TreasuryManager is Ownable2Step {
         address trader,
         Currency currency,
         uint256 totalAmount
-    ) external {
+    ) external onlyAuthorizedHook {
         // Calculate splits
         uint256 rewardsAmount = (totalAmount * REWARDS_TREASURY_BPS) / 10000;
         uint256 platformAmount = totalAmount - rewardsAmount;
