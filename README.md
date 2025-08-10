@@ -8,7 +8,7 @@ Latest deployments can be found [here](./Deployments.md) and historical deployme
 
 ## Attribution
 
-You can learn more about the technical aspects of Doppler in their [documentation](https://docs.doppler.lol/) or [whitepaper](https://github.com/whetstoneresearch/docs/blob/main/whitepapers/doppler/Dutch_auction_Dynamic_Bonding_Curves.pdf). This repository is a forked version of the Doppler protocol that contains modifications that are specific to HighPotential’s use case. For the composable repository, we recommend visiting the canonical [Doppler](https://github.com/whetstoneresearch/doppler) version.
+You can learn more about the technical aspects of Doppler in their [documentation](https://docs.doppler.lol/) or [whitepaper](https://github.com/whetstoneresearch/docs/blob/main/whitepapers/doppler/Dutch_auction_Dynamic_Bonding_Curves.pdf). This repository is a forked version of the Doppler protocol that contains modifications that are specific to HighPotential. For the composable repository, we recommend visiting the canonical [Doppler](https://github.com/whetstoneresearch/doppler) version.
 
 ## Contact
 
