@@ -39,7 +39,7 @@ deploy-unichain:
 # Mainnet V4 deployments
 
 deploy-v4-base:
-	@forge script ./script/deployV4/DeployV4Base.s.sol --private-key $(PRIVATE_KEY) --rpc-url $(BASE_MAINNET_RPC_URL) --verify --verifier blockscout --verifier-url $(BASE_MAINNET_VERIFIER_URL) --broadcast --slow
+	@forge script ./script/deploy/DeployV4Base.s.sol --private-key $(PRIVATE_KEY) --rpc-url $(BASE_MAINNET_RPC_URL) --verify --etherscan-api-key ${BASESCAN_API_KEY} --broadcast --slow
 	$(MAKE) generate-history
 
 deploy-v4-unichain:

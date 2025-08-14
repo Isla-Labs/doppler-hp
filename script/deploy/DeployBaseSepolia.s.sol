@@ -9,7 +9,7 @@ contract DeployBaseSepolia is DeployScript {
         _scriptData = ScriptData({
             chainId: ChainIds.BASE_SEPOLIA,
             poolManager: 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408,
-            protocolOwner: 0xaCE07c3c1D3b556D42633211f0Da71dc6F6d1c42,
+            protocolOwner: msg.sender,
             quoterV2: 0xC5290058841028F1614F3A6F0F5816cAd0df5E27,
             uniswapV2Factory: 0x7Ae58f10f7849cA6F5fB71b7f45CB416c9204b1e,
             uniswapV2Router02: 0x1689E7B1F10000AE47eBfE339a4f69dECd19F602,
