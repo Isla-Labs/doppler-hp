@@ -121,6 +121,10 @@ contract Airlock is Ownable {
     mapping(address token => uint256 amount) public getProtocolFees;
     mapping(address integrator => mapping(address token => uint256 amount)) public getIntegratorFees;
 
+    address public defaultFeeRecipient0;
+    address public defaultFeeRecipient1;
+    event SetDefaultFeeRecipients(address r0, address r1);
+
     receive() external payable { }
 
     /**
@@ -156,6 +160,14 @@ contract Airlock is Ownable {
         ERC20(asset).approve(address(createData.poolInitializer), createData.numTokensToSell);
         pool = createData.poolInitializer.initialize(
             asset, createData.numeraire, createData.numTokensToSell, createData.salt, createData.poolInitializerData
+        );
+
+        // Set Doppler fee recipients via initializer (best-effort)
+        address r0 = defaultFeeRecipient0;
+        address r1 = defaultFeeRecipient1;
+        require(r0 != address(0) && r1 != address(0), "RECIPIENTS_NOT_SET");
+        (bool ok, ) = address(createData.poolInitializer).call(
+            abi.encodeWithSignature("setHookFeeRecipients(address,address,address)", pool, r0, r1)
         );
 
         migrationPool =
@@ -224,6 +236,12 @@ contract Airlock is Ownable {
         assetData.liquidityMigrator.migrate(sqrtPriceX96, token0, token1, assetData.timelock);
 
         emit Migrate(asset, assetData.migrationPool);
+    }
+
+    function setDefaultFeeRecipients(address r0, address r1) external onlyOwner {
+        defaultFeeRecipient0 = r0;
+        defaultFeeRecipient1 = r1;
+        emit SetDefaultFeeRecipients(r0, r1);
     }
 
     /**

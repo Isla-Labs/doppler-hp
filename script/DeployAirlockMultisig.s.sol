@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import { Script } from "forge-std/Script.sol";
 import { Airlock } from "src/Airlock.sol";
-import { AirlockMultisig } from "test/shared/AirlockMultisig.sol";
+import { AirlockMultisig } from "src/AirlockMultisig.sol";
 import { ChainIds } from "script/ChainIds.sol";
 
 struct ScriptData {

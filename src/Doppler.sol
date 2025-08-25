@@ -7,7 +7,7 @@ import { Hooks } from "@v4-core/libraries/Hooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@v4-core/types/PoolId.sol";
 import { BeforeSwapDelta, BeforeSwapDeltaLibrary } from "@v4-core/types/BeforeSwapDelta.sol";
-import { BalanceDelta, add, BalanceDeltaLibrary } from "@v4-core/types/BalanceDelta.sol";
+import { BalanceDelta, add, BalanceDeltaLibrary, toBalanceDelta } from "@v4-core/types/BalanceDelta.sol";
 import { LPFeeLibrary } from "@v4-core/libraries/LPFeeLibrary.sol";
 import { StateLibrary } from "@v4-core/libraries/StateLibrary.sol";
 import { TickMath } from "@v4-core/libraries/TickMath.sol";
@@ -21,6 +21,8 @@ import { ProtocolFeeLibrary } from "@v4-core/libraries/ProtocolFeeLibrary.sol";
 import { SwapMath } from "@v4-core/libraries/SwapMath.sol";
 import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
+
+bytes4 constant ERC20_TRANSFER_SELECTOR = 0xa9059cbb; // transfer(address,uint256)
 
 /// @notice Data for a liquidity slug, an intermediate representation of a `Position`
 /// @dev Output struct when computing slug data for a `Position`
@@ -117,8 +119,10 @@ error AlreadyInitialized();
 /// @notice Thrown when the sender is not the initializer of the pool
 error SenderNotInitializer();
 
-/// @notice Thrown when a donation is attempted
 error CannotDonate();
+
+/// @notice Thrown when fee recipients are already set
+error FeeRecipientsAlreadySet();
 
 /**
  * @notice Emitted when the pool rebalances
@@ -248,6 +252,11 @@ contract Doppler is BaseHook {
 
     /// @dev Range of the upper slug
     int24 internal upperSlugRange;
+
+    /// @notice Recipients for fee forwarding during bonding (token0/token1)
+    address public feeRecipient0;
+    address public feeRecipient1;
+    bool public feeRecipientsSet;
 
     /// @notice Only the pool manager can send ETH to this contract
     receive() external payable {
@@ -826,6 +835,28 @@ contract Doppler is BaseHook {
 
         // Update positions and swap if necessary
         _update(newPositions, sqrtPriceX96, sqrtPriceNext, key);
+
+        // Forward accrued fees (if any) to recipients and clear accruals
+        {
+            int128 a0 = state.feesAccrued.amount0();
+            int128 a1 = state.feesAccrued.amount1();
+
+            uint256 f0 = a0 > 0 ? uint256(uint128(a0)) : 0;
+            uint256 f1 = a1 > 0 ? uint256(uint128(a1)) : 0;
+
+            int128 cleared0;
+            int128 cleared1;
+
+            // token0
+            if (_payout(Currency.unwrap(key.currency0), feeRecipient0, f0)) cleared0 = a0;
+            // token1
+            if (_payout(Currency.unwrap(key.currency1), feeRecipient1, f1)) cleared1 = a1;
+
+            // Clear only what was actually transferred so accounting stays correct
+            if (cleared0 != 0 || cleared1 != 0) {
+                state.feesAccrued = add(state.feesAccrued, toBalanceDelta(-cleared0, -cleared1));
+            }
+        }
 
         // Store new position ticks and liquidity
         positions[LOWER_SLUG_SALT] = newPositions[0];
@@ -1427,6 +1458,38 @@ contract Doppler is BaseHook {
             afterAddLiquidityReturnDelta: false,
             afterRemoveLiquidityReturnDelta: false
         });
+    }
+
+    /// @notice Sets fee recipients once; callable only by the initializer (Airlock)
+    function setFeeRecipients(address r0, address r1) external {
+        if (msg.sender != initializer) revert SenderNotInitializer();
+        if (feeRecipientsSet) revert FeeRecipientsAlreadySet();
+        feeRecipient0 = r0;
+        feeRecipient1 = r1;
+        feeRecipientsSet = true;
+    }
+
+    function _payout(address token, address to, uint256 amt) internal returns (bool ok) {
+        if (amt == 0 || to == address(0)) return false;
+        if (token == address(0)) {
+            (ok,) = payable(to).call{ value: amt }("");
+            return ok;
+        }
+        assembly {
+            mstore(0x00, ERC20_TRANSFER_SELECTOR)
+            mstore(0x04, shl(96, to))
+            mstore(0x24, amt)
+            ok := call(gas(), token, 0, 0x00, 0x44, 0, 0x20)
+            if ok {
+                switch returndatasize()
+                case 0 { }
+                case 32 {
+                    returndatacopy(0x00, 0, 32)
+                    ok := iszero(iszero(mload(0x00)))
+                }
+                default { ok := 0 }
+            }
+        }
     }
 
     /**

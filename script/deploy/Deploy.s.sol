@@ -30,7 +30,7 @@ import { DopplerLensQuoter } from "src/lens/DopplerLens.sol";
 import { LockableUniswapV3Initializer } from "src/LockableUniswapV3Initializer.sol";
 import { NoOpGovernanceFactory } from "src/NoOpGovernanceFactory.sol";
 import { NoOpMigrator } from "src/NoOpMigrator.sol";
-import { AirlockMultisig } from "test/shared/AirlockMultisig.sol";
+import { AirlockMultisig } from "src/AirlockMultisig.sol";
 import { TreasuryManager } from "src/TreasuryManager.sol";
 import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
 import { ITreasuryManager } from "src/interfaces/ITreasuryManager.sol";

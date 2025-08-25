@@ -11,7 +11,7 @@ import { UniswapV3Initializer, IUniswapV3Factory } from "src/UniswapV3Initialize
 import { LockableUniswapV3Initializer } from "src/LockableUniswapV3Initializer.sol";
 import { NoOpGovernanceFactory } from "src/NoOpGovernanceFactory.sol";
 import { NoOpMigrator } from "src/NoOpMigrator.sol";
-import { AirlockMultisig } from "test/shared/AirlockMultisig.sol";
+import { AirlockMultisig } from "src/AirlockMultisig.sol";
 
 struct ScriptData {
     uint256 chainId;

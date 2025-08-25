@@ -139,4 +139,9 @@ contract UniswapV4Initializer is IPoolInitializer, ImmutableAirlock {
         (sqrtPriceX96, token0, fees0, balance0, token1, fees1, balance1) =
             Doppler(payable(hook)).migrate(address(airlock));
     }
+
+    /// @notice Airlock-only helper to set fee recipients on the hook (initializer-gated in hook)
+    function setHookFeeRecipients(address hook, address r0, address r1) external onlyAirlock {
+        Doppler(payable(hook)).setFeeRecipients(r0, r1);
+    }
 }

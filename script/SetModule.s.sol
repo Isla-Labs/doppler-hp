@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { Script, console } from "forge-std/Script.sol";
-import { AirlockMultisig } from "test/shared/AirlockMultisig.sol";
+import { AirlockMultisig } from "src/AirlockMultisig.sol";
 import { ModuleState } from "src/Airlock.sol";
 
 /// @notice Small helper CLI to set module states, for testing purposes.
@@ -17,7 +17,7 @@ contract SetModuleScript is Script {
                     require(state <= 4, "Invalid module state");
 
                     vm.startBroadcast();
-                    AirlockMultisig multisigContract = AirlockMultisig(multisig);
+                    AirlockMultisig multisigContract = AirlockMultisig(payable(multisig));
                     multisigContract.setModuleState(module, ModuleState(state));
                     vm.stopBroadcast();
 
