@@ -5,7 +5,7 @@ import { Ownable } from "@openzeppelin/access/Ownable.sol";
 import { ITokenFactory } from "src/interfaces/ITokenFactory.sol";
 import { DERC20 } from "src/DERC20.sol";
 
-/// @custom:security-contact admin@islalabs.co
+/// @custom:security-contact security@islalabs.co
 contract StakedTokenFactory is ITokenFactory, Ownable {
     constructor(
         address initialOwner

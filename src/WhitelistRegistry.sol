@@ -9,12 +9,13 @@ struct TokenSet {
     address token;
     address vault;
     bool isActive;
+    bool sunsetComplete;
 }
 
 /**
  * @title HighPotential Whitelist Registry
  * @notice List of verified Player Token, Player Vault combinations
- * @dev Single source of truth for HP TokenSets (Player Token, Player Vault, IsActive)
+ * @dev Single source of truth for HP TokenSets (Player Token, Player Vault, isActive, sunsetComplete)
  */
 contract WhitelistRegistry is Ownable2Step {
     

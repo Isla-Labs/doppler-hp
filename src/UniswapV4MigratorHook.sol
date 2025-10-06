@@ -36,7 +36,7 @@ error NotWhitelisted();
 /**
  * @title Uniswap V4 Migrator Hook with Dynamic Fees
  * @author Whetstone Research, Isla Labs
- * @custom:security-contact admin@islalabs.co
+ * @custom:security-contact security@islalabs.co
  */
 contract UniswapV4MigratorHook is BaseHook {
     using PoolIdLibrary for PoolKey;
