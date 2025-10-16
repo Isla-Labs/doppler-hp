@@ -3,8 +3,7 @@ pragma solidity ^0.8.24;
 
 /**
  * @title HighPotential Whitelist Registry
- * @notice List of verified Player Token, Player Vault combinations
- * @dev Single source of truth for HP TokenSets (Player Token, Player Vault, isActive, sunsetComplete)
+ * @notice List of canonical HP markets with full lifecycle schematics
  */
 contract WhitelistRegistry {
     /// @notice Address of the Airlock contract
