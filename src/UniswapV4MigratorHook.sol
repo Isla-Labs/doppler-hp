@@ -32,20 +32,20 @@ contract UniswapV4MigratorHook is BaseHook {
     /// @notice Address of the Uniswap V4 Migrator contract
     address public immutable migrator;
 
-    /// @notice Address of the HPQuoter contract
-    address public immutable hpQuoter;
+    /// @notice Whitelist registry for retrieving market status
+    IWhitelistRegistry public whitelistRegistry;
 
-    /// @notice Address of the HPRouter contract
-    address public immutable hpRouter;
+    /// @notice Address of the HPSwapQuoter contract
+    address public immutable swapQuoter;
 
-    /// @notice PBR distributor
+    /// @notice Address of the HPSwapRouter contract
+    address public immutable swapRouter;
+
+    /// @notice Proxy address of the RewardsTreasury contract for PBR distribution
     address public immutable rewardsTreasury;
 
-    /// @notice Fee collector
-    address public immutable feeCollector;
-
-    /// @notice Whitelist registry for retrieving activity status
-    IWhitelistRegistry public whitelistRegistry;
+    /// @notice Proxy address of the FeeRouter contract
+    address public immutable feeRouter;
 
     // ------------------------------------------
     //  Dynamic Fee Constants
@@ -102,35 +102,35 @@ contract UniswapV4MigratorHook is BaseHook {
     /// @notice Constructor for the Uniswap V4 Migrator Hook
     /// @param manager Address of the Uniswap V4 Pool Manager
     /// @param _migrator Address of the Uniswap V4 Migrator contract
-    /// @param _rewardsTreasury Proxy address for RewardsTreasury
-    /// @param _feeCollector Proxy address for FeeCollector
     /// @param _whitelistRegistry Address of the Whitelist Registry contract
-    /// @param _hpQuoter Address of the HP Quoter contract
-    /// @param _hpRouter Address of the HP Router contract
+    /// @param _swapQuoter Address of the HP Swap Quoter contract
+    /// @param _swapRouter Address of the HP Swap Router contract
+    /// @param _rewardsTreasury Proxy address of the RewardsTreasury contract
+    /// @param _feeRouter Proxy address of the FeeRouter contract
     constructor(
         IPoolManager manager, 
         UniswapV4Migrator _migrator,
-        address _rewardsTreasury,
-        address _feeCollector,
         IWhitelistRegistry _whitelistRegistry,
-        address _hpQuoter,
-        address _hpRouter
+        address _swapQuoter,
+        address _swapRouter,
+        address _rewardsTreasury,
+        address _feeRouter
     ) BaseHook(manager) {
         if (
             address(_migrator) == address(0) || 
-            _rewardsTreasury == address(0) || 
-            _feeCollector == address(0) || 
             address(_whitelistRegistry) == address(0) || 
-            _hpQuoter == address(0) || 
-            _hpRouter == address(0)
+            _swapQuoter == address(0) || 
+            _swapRouter == address(0) || 
+            _rewardsTreasury == address(0) || 
+            _feeRouter == address(0)
         ) revert ZeroAddress();
 
         migrator = address(_migrator);
-        rewardsTreasury = _rewardsTreasury;
-        feeCollector = _feeCollector;
         whitelistRegistry = _whitelistRegistry;
-        hpQuoter = _hpQuoter;
-        hpRouter = _hpRouter;
+        swapQuoter = _swapQuoter;
+        swapRouter = _swapRouter;
+        rewardsTreasury = _rewardsTreasury;
+        feeRouter = _feeRouter;
     }
 
     // ------------------------------------------
@@ -180,7 +180,7 @@ contract UniswapV4MigratorHook is BaseHook {
 
                 // Transfer via PoolManager
                 poolManager.take(key.currency0, rewardsTreasury, rewardsAmount);
-                poolManager.take(key.currency0, feeCollector, feeAmount);
+                poolManager.take(key.currency0, feeRouter, feeAmount);
                 
                 // Return delta to account for fees taken
                 BeforeSwapDelta delta = toBeforeSwapDelta(int128(int256(totalFeeAmount)), 0);
@@ -209,7 +209,7 @@ contract UniswapV4MigratorHook is BaseHook {
             MultiHopContext memory context = _decodeHookData(hookData);
             
             // Skip fee collection for PlayerToken → PlayerToken multi-hops (router or quoter)
-            if ((sender == hpRouter || sender == hpQuoter) && context.isMultiHop && !context.isUsdc) {
+            if ((sender == swapRouter || sender == swapQuoter) && context.isMultiHop && !context.isUsdc) {
                 return (BaseHook.afterSwap.selector, 0); // No fee on first hop
             }
             
@@ -233,7 +233,7 @@ contract UniswapV4MigratorHook is BaseHook {
 
                 // Transfer via PoolManager
                 poolManager.take(key.currency0, rewardsTreasury, rewardsAmount);
-                poolManager.take(key.currency0, feeCollector, feeAmount);
+                poolManager.take(key.currency0, feeRouter, feeAmount);
 
                 // Return delta to account for fees taken
                 return (BaseHook.afterSwap.selector, int128(int256(totalFeeAmount)));
@@ -364,7 +364,7 @@ contract UniswapV4MigratorHook is BaseHook {
 
     /// @notice Gated ETH/USD price for router/quoter fee conversion (6 decimals)
     function quoteEthPriceUsd() external view returns (uint256) {
-        if (msg.sender != hpRouter && msg.sender != hpQuoter) revert NotAllowed();
+        if (msg.sender != swapRouter && msg.sender != swapQuoter) revert NotAllowed();
         return _fetchEthPriceWithFallback();
     }
 
