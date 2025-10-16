@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 /**
  * @title HighPotential Whitelist Registry
  * @notice List of canonical HP markets with full lifecycle schematics
+ * @author Isla Labs
+ * @custom:security-contact security@islalabs.co
  */
 contract WhitelistRegistry {
     /// @notice Address of the Airlock contract

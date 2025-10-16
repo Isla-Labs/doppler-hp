@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { Ownable } from "@openzeppelin/access/Ownable.sol";
-import { Ownable2Step } from "@openzeppelin/access/Ownable2Step.sol";
-
 /**
- * @title Treasury Manager
- * @notice Treasury management for HP hooks
+ * @title HighPotential Treasury Manager
+ * @notice Canonical treasury storage and onchain fee splits
+ * @author Isla Labs
+ * @custom:security-contact security@islalabs.co
  */
-contract TreasuryManager is Ownable2Step {
+contract TreasuryManager {
+    /// @notice Address of the MarketOrchestrator contract
+    address public immutable marketOrchestrator;
+
+    // ------------------------------------------
+    //  Fee Distribution Config
+    // ------------------------------------------
     
     /// @notice Treasury receiving platform share of fees
     address public platformTreasury;
@@ -22,18 +27,32 @@ contract TreasuryManager is Ownable2Step {
     /// @notice Platform treasury allocation percentage (10000 - rewardsTreasuryBps, e.g. 10000 - 8900 = 11.00%)
     uint256 public platformTreasuryBps;
 
+    // ------------------------------------------
+    //  Events / Errors
+    // ------------------------------------------
+
     event TreasuryUpdated(address indexed newPlatformTreasury, address indexed newRewardsTreasury);
     event SplitBpsUpdated(uint256 rewardsBps, uint256 platformBps);
     
     error ZeroAddress();
     error InvalidBps();
 
+    // ------------------------------------------
+    //  Constructor
+    // ------------------------------------------
+
     constructor(
-        address _initialOwner,
+        address _marketOrchestrator,
         address _platformTreasury,
         address _rewardsTreasury
-    ) Ownable(_initialOwner) {
-        if (_platformTreasury == address(0) || _rewardsTreasury == address(0)) revert ZeroAddress();
+    ) {
+        if (
+            _marketOrchestrator == address(0) || 
+            _platformTreasury == address(0) || 
+            _rewardsTreasury == address(0)
+        ) revert ZeroAddress();
+
+        marketOrchestrator = _marketOrchestrator;
         
         platformTreasury = _platformTreasury;
         rewardsTreasury = _rewardsTreasury;
@@ -43,12 +62,25 @@ contract TreasuryManager is Ownable2Step {
         emit TreasuryUpdated(_platformTreasury, _rewardsTreasury);
         emit SplitBpsUpdated(rewardsTreasuryBps, platformTreasuryBps);
     }
+
+    // ------------------------------------------
+    //  Access Control
+    // ------------------------------------------
     
-    /// @notice Update treasury addresses (only owner)
+    modifier onlyMarketOrchestrator() {
+        require(msg.sender == marketOrchestrator(), "Not authorized");
+        _;
+    }
+
+    // ------------------------------------------
+    //  Upkeep
+    // ------------------------------------------
+    
+    /// @notice Update treasury addresses
     function updateTreasuries(
         address _newPlatformTreasury,
         address _newRewardsTreasury
-    ) external onlyOwner {
+    ) external onlyMarketOrchestrator {
         if (_newPlatformTreasury == address(0) || _newRewardsTreasury == address(0)) revert ZeroAddress();
         
         platformTreasury = _newPlatformTreasury;
@@ -57,13 +89,17 @@ contract TreasuryManager is Ownable2Step {
         emit TreasuryUpdated(_newPlatformTreasury, _newRewardsTreasury);
     }
 
-    /// @notice Update split bps (only owner). Must be between 1 and 9999.
-    function updateSplitBps(uint256 _rewardsBps) external onlyOwner {
+    /// @notice Update split bps. Must be between 1 and 9999.
+    function updateSplitBps(uint256 _rewardsBps) external onlyMarketOrchestrator {
         if (_rewardsBps == 0 || _rewardsBps >= 10000) revert InvalidBps();
         rewardsTreasuryBps = _rewardsBps;
         platformTreasuryBps = 10000 - _rewardsBps;
         emit SplitBpsUpdated(_rewardsBps, 10000 - _rewardsBps);
     }
+
+    // ------------------------------------------
+    //  External View
+    // ------------------------------------------
     
     /// @notice Get current treasury addresses
     function getTreasuries() external view returns (address platform, address rewards) {
