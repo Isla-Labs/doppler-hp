@@ -149,4 +149,9 @@ contract WhitelistRegistry {
     function isMarketActive(address token) external view returns (bool) {
         return tokenSets[token].isActive;
     }
+
+    function isAuthorizedHookFor(address token, address hook) external view returns (bool) {
+        TokenSet storage ts = tokenSets[token];
+        return hook == ts.dopplerHook || hook == ts.migratorHook;
+    }
 }
