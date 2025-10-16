@@ -146,8 +146,7 @@ contract WhitelistRegistry {
     //  External View
     // ------------------------------------------
 
-    function getVaultAndStatus(address token) external view returns (address vault, bool isActive) {
-        TokenSet storage ts = tokenSets[token];
-        return (ts.vault, ts.isActive);
+    function isMarketActive(address token) external view returns (bool) {
+        return tokenSets[token].isActive;
     }
 }

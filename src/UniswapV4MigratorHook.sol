@@ -24,18 +24,6 @@ struct MultiHopContext {
     bool isUsdc;
 }
 
-/// @notice Thrown when the caller is not the Uniswap V4 Migrator
-error OnlyMigrator();
-
-/// @notice Thrown when providing zero address where not allowed
-error ZeroAddress();
-
-/// @notice Thrown during unauthorized queries
-error NotAllowed();
-
-/// @notice Thrown during buy attempts when market is being or has been sunsetted
-error MarketSunset();
-
 /**
  * @title Uniswap V4 Migrator Hook with Dynamic Fees
  * @author Whetstone Research, Isla Labs
@@ -57,10 +45,10 @@ contract UniswapV4MigratorHook is BaseHook {
     /// @notice Address of the HPRouter contract
     address public immutable hpRouter;
 
-    /// @notice Treasury manager for centralized fee distribution
+    /// @notice Treasury manager for fee distribution config
     ITreasuryManager public treasuryManager;
 
-    /// @notice Whitelist registry for platform account verification
+    /// @notice Whitelist registry for retrieving activity status
     IWhitelistRegistry public whitelistRegistry;
 
     // ------------------------------------------
@@ -88,6 +76,18 @@ contract UniswapV4MigratorHook is BaseHook {
     uint256 internal constant TIER_3_THRESHOLD_USD = 50000;
     uint256 internal constant SCALE_PARAMETER = 1000;
 
+    /// @notice Fee split BPS
+    uint256 constant BPS = 10_000;
+
+    // ------------------------------------------
+    //  Events/Errors
+    // ------------------------------------------
+
+    error OnlyMigrator();
+    error ZeroAddress();
+    error NotAllowed();
+    error MarketSunset();
+
     // ------------------------------------------
     //  Access
     // ------------------------------------------
@@ -104,30 +104,32 @@ contract UniswapV4MigratorHook is BaseHook {
 
     /// @notice Constructor for the Uniswap V4 Migrator Hook
     /// @param manager Address of the Uniswap V4 Pool Manager
-    /// @param migrator_ Address of the Uniswap V4 Migrator contract
+    /// @param _migrator Address of the Uniswap V4 Migrator contract
     /// @param _treasuryManager Address of the Treasury Manager contract
     /// @param _whitelistRegistry Address of the Whitelist Registry contract
+    /// @param _hpQuoter Address of the HP Quoter contract
+    /// @param _hpRouter Address of the HP Router contract
     constructor(
         IPoolManager manager, 
-        UniswapV4Migrator migrator_,
+        UniswapV4Migrator _migrator,
         ITreasuryManager _treasuryManager,
         IWhitelistRegistry _whitelistRegistry,
-        address hpQuoter_,
-        address hpRouter_
+        address _hpQuoter,
+        address _hpRouter
     ) BaseHook(manager) {
-        migrator = address(migrator_);
-        
-        if (address(_treasuryManager) == address(0)) revert ZeroAddress();
+        if (
+            address(_migrator) == address(0) || 
+            address(_treasuryManager) == address(0) || 
+            address(_whitelistRegistry) == address(0) || 
+            _hpQuoter == address(0) || 
+            _hpRouter == address(0)
+        ) revert ZeroAddress();
+
+        migrator = address(_migrator);
         treasuryManager = _treasuryManager;
-
-        if (address(_whitelistRegistry) == address(0)) revert ZeroAddress();
         whitelistRegistry = _whitelistRegistry;
-
-        if (hpQuoter_ == address(0)) revert ZeroAddress();
-        hpQuoter = hpQuoter_;
-
-        if (hpRouter_ == address(0)) revert ZeroAddress();
-        hpRouter = hpRouter_;
+        hpQuoter = _hpQuoter;
+        hpRouter = _hpRouter;
     }
 
     // ------------------------------------------
@@ -140,8 +142,6 @@ contract UniswapV4MigratorHook is BaseHook {
         PoolKey calldata key,
         uint160 sqrtPriceX96
     ) internal view override onlyMigrator(sender) returns (bytes4) {
-        // Apply the migrator check
-        if (sender != migrator) revert OnlyMigrator();
         return BaseHook.beforeInitialize.selector;
     }
 
@@ -156,9 +156,7 @@ contract UniswapV4MigratorHook is BaseHook {
         bool isBuy = swapParams.zeroForOne;
         
         if (isBuy) {
-            address pt = Currency.unwrap(key.currency1);
-            (, bool isActive) = whitelistRegistry.getVaultAndStatus(pt);
-            if (!isActive) revert MarketSunset();
+            if (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1))) revert MarketSunset();
 
             // Apply dynamic fees on ETH input
             uint256 ethPriceUsd = _fetchEthPriceWithFallback();
@@ -170,13 +168,16 @@ contract UniswapV4MigratorHook is BaseHook {
             
             if (dynamicFeeBps > 0) {
                 // Calculate fee amount in ETH
-                uint256 totalFeeAmount = (inputAmount * dynamicFeeBps) / 10000;
+                uint256 totalFeeAmount = (inputAmount * dynamicFeeBps) / BPS;
+
+                // Ensure compatibility with int128 delta
+                require(totalFeeAmount <= type(uint128).max, "fee overflow");
 
                 // Fetch treasuries and split
                 (address platform, address rewards) = treasuryManager.getTreasuries();
                 (uint256 rewardsBps, ) = treasuryManager.getSplitBps();
 
-                uint256 rewardsAmount = (totalFeeAmount * rewardsBps) / 10000;
+                uint256 rewardsAmount = (totalFeeAmount * rewardsBps) / BPS;
                 uint256 platformAmount = totalFeeAmount - rewardsAmount;
 
                 // Transfer via PoolManager
@@ -224,12 +225,15 @@ contract UniswapV4MigratorHook is BaseHook {
             
             if (dynamicFeeBps > 0) {
                 // Calculate fee amount in ETH
-                uint256 totalFeeAmount = (outputAmount * dynamicFeeBps) / 10000;
+                uint256 totalFeeAmount = (outputAmount * dynamicFeeBps) / BPS;
+
+                // Ensure compatibility with int128 delta
+                require(totalFeeAmount <= type(uint128).max, "fee overflow");
 
                 (address platform, address rewards) = treasuryManager.getTreasuries();
                 (uint256 rewardsBps, ) = treasuryManager.getSplitBps();
 
-                uint256 rewardsAmount = (totalFeeAmount * rewardsBps) / 10000;
+                uint256 rewardsAmount = (totalFeeAmount * rewardsBps) / BPS;
                 uint256 platformAmount = totalFeeAmount - rewardsAmount;
 
                 poolManager.take(key.currency0, rewards, rewardsAmount);

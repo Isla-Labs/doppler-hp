@@ -2,6 +2,28 @@
 pragma solidity ^0.8.24;
 
 interface IWhitelistRegistry {
-    function isTransferAllowed(address account) external view returns (bool);
-    function hasAdminAccess(address account) external view returns (bool);
+    function isMarketActive(address token) external view returns (bool);
+    function tokenSets(address token) external view returns (
+        address tokenAddr,
+        address vault,
+        address dopplerHook,
+        address migratorHook,
+        bool hasMigrated,
+        bool isActive,
+        uint256 deactivatedAt,
+        bool sunsetComplete
+    );
+}
+
+interface IWhitelistRegistryAdmin {
+    function addMarket(
+        address token,
+        address vault,
+        address dopplerHook,
+        address migratorHook
+    ) external;
+
+    function updateMigrationStatus(address token) external;
+
+    function discontinueMarket(address token) external;
 }
