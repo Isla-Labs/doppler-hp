@@ -6,13 +6,11 @@ import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { AggregatorV3Interface } from "src/interfaces/AggregatorV3Interface.sol";
 import { Hooks } from "@v4-core/libraries/Hooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
-import { PoolId, PoolIdLibrary } from "@v4-core/types/PoolId.sol";
 import { BeforeSwapDelta, toBeforeSwapDelta } from "@v4-core/types/BeforeSwapDelta.sol";
 import { BalanceDelta } from "@v4-core/types/BalanceDelta.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { SD59x18, exp, sd } from "@prb/math/src/SD59x18.sol";
 import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
-import { ITreasuryManager } from "src/interfaces/ITreasuryManager.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
 /// @notice Context for multi-hop swap coordination
@@ -30,11 +28,6 @@ struct MultiHopContext {
  * @custom:security-contact security@islalabs.co
  */
 contract UniswapV4MigratorHook is BaseHook {
-    using PoolIdLibrary for PoolKey;
-
-    // ------------------------------------------
-    //  Config
-    // ------------------------------------------
 
     /// @notice Address of the Uniswap V4 Migrator contract
     address public immutable migrator;
@@ -45,8 +38,11 @@ contract UniswapV4MigratorHook is BaseHook {
     /// @notice Address of the HPRouter contract
     address public immutable hpRouter;
 
-    /// @notice Treasury manager for fee distribution config
-    ITreasuryManager public treasuryManager;
+    /// @notice PBR distributor
+    address public immutable rewardsTreasury;
+
+    /// @notice Fee collector
+    address public immutable feeCollector;
 
     /// @notice Whitelist registry for retrieving activity status
     IWhitelistRegistry public whitelistRegistry;
@@ -78,6 +74,7 @@ contract UniswapV4MigratorHook is BaseHook {
 
     /// @notice Fee split BPS
     uint256 constant BPS = 10_000;
+    uint256 constant PBR_BPS = 8900;
 
     // ------------------------------------------
     //  Events/Errors
@@ -105,28 +102,32 @@ contract UniswapV4MigratorHook is BaseHook {
     /// @notice Constructor for the Uniswap V4 Migrator Hook
     /// @param manager Address of the Uniswap V4 Pool Manager
     /// @param _migrator Address of the Uniswap V4 Migrator contract
-    /// @param _treasuryManager Address of the Treasury Manager contract
+    /// @param _rewardsTreasury Proxy address for RewardsTreasury
+    /// @param _feeCollector Proxy address for FeeCollector
     /// @param _whitelistRegistry Address of the Whitelist Registry contract
     /// @param _hpQuoter Address of the HP Quoter contract
     /// @param _hpRouter Address of the HP Router contract
     constructor(
         IPoolManager manager, 
         UniswapV4Migrator _migrator,
-        ITreasuryManager _treasuryManager,
+        address _rewardsTreasury,
+        address _feeCollector,
         IWhitelistRegistry _whitelistRegistry,
         address _hpQuoter,
         address _hpRouter
     ) BaseHook(manager) {
         if (
             address(_migrator) == address(0) || 
-            address(_treasuryManager) == address(0) || 
+            _rewardsTreasury == address(0) || 
+            _feeCollector == address(0) || 
             address(_whitelistRegistry) == address(0) || 
             _hpQuoter == address(0) || 
             _hpRouter == address(0)
         ) revert ZeroAddress();
 
         migrator = address(_migrator);
-        treasuryManager = _treasuryManager;
+        rewardsTreasury = _rewardsTreasury;
+        feeCollector = _feeCollector;
         whitelistRegistry = _whitelistRegistry;
         hpQuoter = _hpQuoter;
         hpRouter = _hpRouter;
@@ -173,16 +174,13 @@ contract UniswapV4MigratorHook is BaseHook {
                 // Ensure compatibility with int128 delta
                 require(totalFeeAmount <= type(uint128).max, "fee overflow");
 
-                // Fetch treasuries and split
-                (address platform, address rewards) = treasuryManager.getTreasuries();
-                (uint256 rewardsBps, ) = treasuryManager.getSplitBps();
-
-                uint256 rewardsAmount = (totalFeeAmount * rewardsBps) / BPS;
-                uint256 platformAmount = totalFeeAmount - rewardsAmount;
+                // Split fees 89:11 for PBR
+                uint256 rewardsAmount = (totalFeeAmount * PBR_BPS) / BPS;
+                uint256 feeAmount = totalFeeAmount - rewardsAmount;
 
                 // Transfer via PoolManager
-                poolManager.take(key.currency0, rewards, rewardsAmount);
-                poolManager.take(key.currency0, platform, platformAmount);
+                poolManager.take(key.currency0, rewardsTreasury, rewardsAmount);
+                poolManager.take(key.currency0, feeCollector, feeAmount);
                 
                 // Return delta to account for fees taken
                 BeforeSwapDelta delta = toBeforeSwapDelta(int128(int256(totalFeeAmount)), 0);
@@ -215,7 +213,6 @@ contract UniswapV4MigratorHook is BaseHook {
                 return (BaseHook.afterSwap.selector, 0); // No fee on first hop
             }
             
-            // Handle single-hop sells
             // Apply dynamic fees on ETH output
             uint256 ethPriceUsd = _fetchEthPriceWithFallback();
             uint256 outputAmount = delta.amount0() < 0 
@@ -230,14 +227,13 @@ contract UniswapV4MigratorHook is BaseHook {
                 // Ensure compatibility with int128 delta
                 require(totalFeeAmount <= type(uint128).max, "fee overflow");
 
-                (address platform, address rewards) = treasuryManager.getTreasuries();
-                (uint256 rewardsBps, ) = treasuryManager.getSplitBps();
+                // Split fees 89:11 for PBR
+                uint256 rewardsAmount = (totalFeeAmount * PBR_BPS) / BPS;
+                uint256 feeAmount = totalFeeAmount - rewardsAmount;
 
-                uint256 rewardsAmount = (totalFeeAmount * rewardsBps) / BPS;
-                uint256 platformAmount = totalFeeAmount - rewardsAmount;
-
-                poolManager.take(key.currency0, rewards, rewardsAmount);
-                poolManager.take(key.currency0, platform, platformAmount);
+                // Transfer via PoolManager
+                poolManager.take(key.currency0, rewardsTreasury, rewardsAmount);
+                poolManager.take(key.currency0, feeCollector, feeAmount);
 
                 // Return delta to account for fees taken
                 return (BaseHook.afterSwap.selector, int128(int256(totalFeeAmount)));
