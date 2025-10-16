@@ -41,14 +41,10 @@ error MarketSunset();
 contract UniswapV4MigratorHook is BaseHook {
     using PoolIdLibrary for PoolKey;
 
-    // ==========================================
-    // CONTRACT STATE
-    // ==========================================
-
     /// @notice Address of the Uniswap V4 Migrator contract
     address public immutable migrator;
 
-    /// @notice Address of the HPRouter contract
+    /// @notice Address of the HPQuoter contract
     address public immutable hpQuoter;
 
     /// @notice Address of the HPRouter contract
@@ -60,16 +56,15 @@ contract UniswapV4MigratorHook is BaseHook {
     /// @notice Whitelist registry for platform account verification
     IWhitelistRegistry public whitelistRegistry;
 
-    // ==========================================
-    // DYNAMIC FEE CONSTANTS
-    // ==========================================
+    // ------------------------------------------
+    //  Dynamic Fee Constants
+    // ------------------------------------------
 
     /// @notice Chainlink ETH-USD price feed on Base
     address public CHAINLINK_ETH_USD = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
     
-    /// @notice Oracle validation constants
-    uint256 internal constant MAX_STALENESS = 3600; // 1 hour
-    uint256 public fallbackEthPriceUsd = 2500000000; // (6 decimals)
+    /// @notice Fallback ETH-USD price for testnet
+    uint256 public fallbackEthPriceUsd = 3000000000; // (6 decimals)
 
     /// @notice Dynamic fee constants
     uint256 internal constant FEE_START_TIER_1 = 500;
@@ -87,11 +82,10 @@ contract UniswapV4MigratorHook is BaseHook {
     uint256 internal constant SCALE_PARAMETER = 1000;
 
     error NotAllowed();
-    error InvalidPrice();
 
-    // ==========================================
-    // MODIFIERS
-    // ==========================================
+    // ------------------------------------------
+    //  Access
+    // ------------------------------------------
 
     /// @notice Modifier to ensure the caller is the Uniswap V4 Migrator
     modifier onlyMigrator(address sender) {
@@ -99,22 +93,9 @@ contract UniswapV4MigratorHook is BaseHook {
         _;
     }
 
-    /// @notice Modifier to ensure the caller is admin for update function
-    modifier onlyAdmin(address sender) {
-        if (!whitelistRegistry.hasAdminAccess(sender)) revert NotAllowed();
-        _;
-    }
-
-    // ==========================================
-    // EVENTS
-    // ==========================================
-
-    event FallbackPriceUpdated(uint256 newPrice, address indexed updatedBy);
-    event OracleAddressUpdated(address indexed newOracle, address indexed updatedBy);
-
-    // ==========================================
-    // CONSTRUCTOR
-    // ==========================================
+    // ------------------------------------------
+    //  Constructor
+    // ------------------------------------------
 
     /// @notice Constructor for the Uniswap V4 Migrator Hook
     /// @param manager Address of the Uniswap V4 Pool Manager
@@ -144,9 +125,9 @@ contract UniswapV4MigratorHook is BaseHook {
         hpRouter = hpRouter_;
     }
 
-    // ==========================================
-    // HOOK FUNCTIONS
-    // ==========================================
+    // ------------------------------------------
+    //  Hook Functions
+    // ------------------------------------------
 
     /// @notice Hook that runs before pool initialization
     function _beforeInitialize(
@@ -257,36 +238,9 @@ contract UniswapV4MigratorHook is BaseHook {
         return (BaseHook.afterSwap.selector, 0);
     }
 
-    // ==========================================
-    // DYNAMIC FEE CALCULATION
-    // ==========================================
-
-    /// @notice Fetch ETH price for swaps (uses fallback if needed)
-    /// @dev For swaps (failed price fetch doesn't interfere with execution)
-    /// @return ethPriceUsd ETH price in USD (6 decimal precision)
-    function _fetchEthPriceWithFallback() internal view returns (uint256 ethPriceUsd) {
-        // Chain ID constants
-        uint256 BASE_MAINNET = 8453;
-        
-        // Skip Chainlink on testnets - use fallback price directly
-        if (block.chainid != BASE_MAINNET) {
-            return fallbackEthPriceUsd;
-        }
-        
-        // Only use Chainlink on Base mainnet
-        try AggregatorV3Interface(CHAINLINK_ETH_USD).latestRoundData() returns (
-            uint80, int256 answer, uint256, uint256 updatedAt, uint80
-        ) {
-            // Check if price is stale or invalid
-            if (block.timestamp - updatedAt <= MAX_STALENESS && answer > 0) {
-                uint256 oraclePrice = uint256(answer) / 100; // Convert 8→6 decimals
-                return oraclePrice;
-            }
-        } catch {}
-        
-        // Fallback for mainnet oracle failures
-        return fallbackEthPriceUsd;
-    }
+    // ------------------------------------------
+    //  Dynamic Fee Calculation
+    // ------------------------------------------
 
     /// @notice Calculate dynamic fee with exponential decay
     /// @param volumeEth Volume in ETH (wei)
@@ -337,9 +291,9 @@ contract UniswapV4MigratorHook is BaseHook {
         return uint256(result.unwrap());
     }
 
-    // ==========================================
-    // UTILITY FUNCTIONS
-    // ==========================================
+    // ------------------------------------------
+    //  Utility Functions
+    // ------------------------------------------
 
     /// @notice Decode hookData into MultiHopContext
     /// @param hookData Encoded multi-hop context data
@@ -351,32 +305,33 @@ contract UniswapV4MigratorHook is BaseHook {
         return abi.decode(hookData, (MultiHopContext));
     }
 
-    /// @notice Update oracle
-    /// @param newOracleAddress Oracle address (address(0) = no change)
-    /// @param newFallbackPrice Fallback price in USD (0 = no change)
-    function updateOracle(
-        address newOracleAddress, 
-        uint256 newFallbackPrice
-    ) external onlyAdmin(msg.sender) {
+    /// @notice Fetch ETH price (uses fallback on testnet)
+    /// @return ethPriceUsd ETH price in USD (6 decimal precision)
+    function _fetchEthPriceWithFallback() internal view returns (uint256 ethPriceUsd) {
+        // Chain ID constants
+        uint256 BASE_MAINNET = 8453;
         
-        // Update oracle address if provided
-        if (newOracleAddress != address(0)) {
-            address oldOracle = CHAINLINK_ETH_USD;
-            CHAINLINK_ETH_USD = newOracleAddress;
-            emit OracleAddressUpdated(newOracleAddress, msg.sender);
+        // Skip Chainlink on testnets - use fallback price directly
+        if (block.chainid != BASE_MAINNET) {
+            return fallbackEthPriceUsd;
         }
         
-        // Update fallback price if provided
-        if (newFallbackPrice != 0) {
-            uint256 oldPrice = fallbackEthPriceUsd;
-            fallbackEthPriceUsd = newFallbackPrice;
-            emit FallbackPriceUpdated(newFallbackPrice, msg.sender);
-        }
+        // Only use Chainlink on Base mainnet
+        try AggregatorV3Interface(CHAINLINK_ETH_USD).latestRoundData() returns (
+            uint80, int256 answer, uint256, uint256, uint80
+        ) {
+            if (answer > 0) {
+                return uint256(answer) / 100; // Convert 8→6 decimals
+            }
+        } catch {}
+        
+        // Fallback for mainnet oracle failures
+        return fallbackEthPriceUsd;
     }
 
-    // ==========================================
-    // HOOK PERMISSIONS
-    // ==========================================
+    // ------------------------------------------
+    //  Hook Permissions
+    // ------------------------------------------
 
     /// @notice Returns the hook permissions configuration
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
@@ -398,9 +353,9 @@ contract UniswapV4MigratorHook is BaseHook {
         });
     }
 
-    // ==========================================
-    // EXTERNAL VIEW
-    // ==========================================
+    // ------------------------------------------
+    //  External Helpers
+    // ------------------------------------------
 
     /// @notice Gated ETH/USD price for router/quoter fee conversion (6 decimals)
     function quoteEthPriceUsd() external view returns (uint256) {
