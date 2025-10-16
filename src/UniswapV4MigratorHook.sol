@@ -30,8 +30,8 @@ error OnlyMigrator();
 /// @notice Thrown when providing zero address where not allowed
 error ZeroAddress();
 
-/// @notice Thrown when sender is not whitelisted
-error NotWhitelisted();
+/// @notice Disables buys when market is being or has been sunsetted
+error MarketSunset();
 
 /**
  * @title Uniswap V4 Migrator Hook with Dynamic Fees
@@ -47,6 +47,12 @@ contract UniswapV4MigratorHook is BaseHook {
 
     /// @notice Address of the Uniswap V4 Migrator contract
     address public immutable migrator;
+
+    /// @notice Address of the HPRouter contract
+    address public immutable hpQuoter;
+
+    /// @notice Address of the HPRouter contract
+    address public immutable hpRouter;
 
     /// @notice Treasury manager for centralized fee distribution
     ITreasuryManager public treasuryManager;
@@ -119,7 +125,9 @@ contract UniswapV4MigratorHook is BaseHook {
         IPoolManager manager, 
         UniswapV4Migrator migrator_,
         ITreasuryManager _treasuryManager,
-        IWhitelistRegistry _whitelistRegistry
+        IWhitelistRegistry _whitelistRegistry,
+        address hpQuoter_,
+        address hpRouter_
     ) BaseHook(manager) {
         migrator = address(migrator_);
         
@@ -128,6 +136,12 @@ contract UniswapV4MigratorHook is BaseHook {
 
         if (address(_whitelistRegistry) == address(0)) revert ZeroAddress();
         whitelistRegistry = _whitelistRegistry;
+
+        if (hpQuoter_ == address(0)) revert ZeroAddress();
+        hpQuoter = hpQuoter_;
+
+        if (hpRouter_ == address(0)) revert ZeroAddress();
+        hpRouter = hpRouter_;
     }
 
     // ==========================================
@@ -152,11 +166,14 @@ contract UniswapV4MigratorHook is BaseHook {
         IPoolManager.SwapParams calldata swapParams,
         bytes calldata hookData
     ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
-        
         // Check direction (ETH → Player Token)
         bool isBuy = swapParams.zeroForOne;
         
         if (isBuy) {
+            address pt = Currency.unwrap(key.currency1);
+            (, bool isActive) = whitelistRegistry.getVaultAndStatus(pt);
+            if (!isActive) revert MarketSunset();
+
             // Apply dynamic fees on ETH input
             uint256 ethPriceUsd = _fetchEthPriceWithFallback();
             uint256 inputAmount = uint256(swapParams.amountSpecified < 0 
@@ -168,14 +185,17 @@ contract UniswapV4MigratorHook is BaseHook {
             if (dynamicFeeBps > 0) {
                 // Calculate fee amount in ETH
                 uint256 totalFeeAmount = (inputAmount * dynamicFeeBps) / 10000;
-                
-                // Distribute fees via Treasury Manager
-                treasuryManager.distributeFees(
-                    poolManager,
-                    sender,
-                    key.currency0,
-                    totalFeeAmount
-                );
+
+                // Fetch treasuries and split
+                (address platform, address rewards) = treasuryManager.getTreasuries();
+                (uint256 rewardsBps, ) = treasuryManager.getSplitBps();
+
+                uint256 rewardsAmount = (totalFeeAmount * rewardsBps) / 10000;
+                uint256 platformAmount = totalFeeAmount - rewardsAmount;
+
+                // Transfer via PoolManager
+                poolManager.take(key.currency0, rewards, rewardsAmount);
+                poolManager.take(key.currency0, platform, platformAmount);
                 
                 // Return delta to account for fees taken
                 BeforeSwapDelta delta = toBeforeSwapDelta(int128(int256(totalFeeAmount)), 0);
@@ -203,8 +223,8 @@ contract UniswapV4MigratorHook is BaseHook {
             // Decode multi-hop context
             MultiHopContext memory context = _decodeHookData(hookData);
             
-            // Skip fee collection for PlayerToken → PlayerToken multi-hops
-            if (context.isMultiHop && !context.isUsdc) {
+            // Skip fee collection for PlayerToken → PlayerToken multi-hops (router or quoter)
+            if ((sender == hpRouter || sender == hpQuoter) && context.isMultiHop && !context.isUsdc) {
                 return (BaseHook.afterSwap.selector, 0); // No fee on first hop
             }
             
@@ -219,15 +239,16 @@ contract UniswapV4MigratorHook is BaseHook {
             if (dynamicFeeBps > 0) {
                 // Calculate fee amount in ETH
                 uint256 totalFeeAmount = (outputAmount * dynamicFeeBps) / 10000;
-                
-                // Distribute fees via Treasury Manager
-                treasuryManager.distributeFees(
-                    poolManager,
-                    sender,
-                    key.currency0,
-                    totalFeeAmount
-                );
-                
+
+                (address platform, address rewards) = treasuryManager.getTreasuries();
+                (uint256 rewardsBps, ) = treasuryManager.getSplitBps();
+
+                uint256 rewardsAmount = (totalFeeAmount * rewardsBps) / 10000;
+                uint256 platformAmount = totalFeeAmount - rewardsAmount;
+
+                poolManager.take(key.currency0, rewards, rewardsAmount);
+                poolManager.take(key.currency0, platform, platformAmount);
+
                 // Return delta to account for fees taken
                 return (BaseHook.afterSwap.selector, int128(int256(totalFeeAmount)));
             }
@@ -380,6 +401,12 @@ contract UniswapV4MigratorHook is BaseHook {
     // ==========================================
     // EXTERNAL VIEW
     // ==========================================
+
+    /// @notice Gated ETH/USD price for router/quoter fee conversion (6 decimals)
+    function quoteEthPriceUsd() external view returns (uint256) {
+        if (msg.sender != hpRouter && msg.sender != hpQuoter) revert NotAllowed();
+        return _fetchEthPriceWithFallback();
+    }
 
     /// @notice Calculate dynamic fee for a given volume
     /// @param volumeEth Volume in ETH (wei)

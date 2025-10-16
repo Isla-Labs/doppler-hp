@@ -3,51 +3,31 @@ pragma solidity ^0.8.24;
 
 import { Ownable } from "@openzeppelin/access/Ownable.sol";
 import { Ownable2Step } from "@openzeppelin/access/Ownable2Step.sol";
-import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
-import { Currency } from "@v4-core/types/Currency.sol";
 
 /**
  * @title Treasury Manager
  * @notice Treasury management for HP hooks
- * @dev Single source of truth for fee distribution across all hooks
  */
 contract TreasuryManager is Ownable2Step {
     
-    /// @notice Treasury receiving 11% of dynamic fee output
+    /// @notice Treasury receiving platform share of fees
     address public platformTreasury;
     
-    /// @notice Treasury receiving 89% of dynamic fee output
+    /// @notice Treasury receiving rewards share of fees
     address public rewardsTreasury;
-    
-    /// @notice Registered hooks that can distribute fees
-    mapping(address => bool) public authorizedHooks;
-    
-    /// @notice Rewards treasury allocation percentage (89% = 8900 basis points)
-    uint256 public constant REWARDS_TREASURY_BPS = 8900;
-    
-    /// @notice Platform treasury allocation percentage (11% = 1100 basis points)
-    uint256 public constant PLATFORM_TREASURY_BPS = 1100;
-    
+
+    /// @notice Rewards treasury allocation percentage (e.g. 8900 = 89.00%)
+    uint256 public rewardsTreasuryBps;
+
+    /// @notice Platform treasury allocation percentage (10000 - rewardsTreasuryBps, e.g. 10000 - 8900 = 11.00%)
+    uint256 public platformTreasuryBps;
+
     event TreasuryUpdated(address indexed newPlatformTreasury, address indexed newRewardsTreasury);
-    event HookAuthorized(address indexed hook);
-    event FeesDistributed(
-        address indexed hook,
-        address indexed trader,
-        Currency currency,
-        uint256 totalAmount,
-        uint256 rewardsAmount,
-        uint256 platformAmount
-    );
+    event SplitBpsUpdated(uint256 rewardsBps, uint256 platformBps);
     
     error ZeroAddress();
-    error AlreadyAuthorized();
-    error NotAuthorized();
-    
-    modifier onlyAuthorizedHook() {
-        if (!authorizedHooks[msg.sender]) revert NotAuthorized();
-        _;
-    }
-    
+    error InvalidBps();
+
     constructor(
         address _initialOwner,
         address _platformTreasury,
@@ -57,8 +37,11 @@ contract TreasuryManager is Ownable2Step {
         
         platformTreasury = _platformTreasury;
         rewardsTreasury = _rewardsTreasury;
+        rewardsTreasuryBps = 8900; // default 89% rewards / 11% platform
+        platformTreasuryBps = 10000 - rewardsTreasuryBps;
         
         emit TreasuryUpdated(_platformTreasury, _rewardsTreasury);
+        emit SplitBpsUpdated(rewardsTreasuryBps, platformTreasuryBps);
     }
     
     /// @notice Update treasury addresses (only owner)
@@ -73,47 +56,23 @@ contract TreasuryManager is Ownable2Step {
         
         emit TreasuryUpdated(_newPlatformTreasury, _newRewardsTreasury);
     }
-    
-    /// @notice Add authorized hook (only owner)
-    function addAuthorizedHook(address hook) external onlyOwner {
-        if (hook == address(0)) revert ZeroAddress();
-        if (authorizedHooks[hook]) revert AlreadyAuthorized();
-        
-        authorizedHooks[hook] = true;
-        emit HookAuthorized(hook);
-    }
-    
-    /// @notice Distribute fees between treasuries (only authorized hooks)
-    /// @param poolManager The Uniswap V4 pool manager
-    /// @param trader Address of the trader (for events)
-    /// @param currency The currency to distribute
-    /// @param totalAmount Total fee amount to distribute
-    function distributeFees(
-        IPoolManager poolManager,
-        address trader,
-        Currency currency,
-        uint256 totalAmount
-    ) external onlyAuthorizedHook {
-        // Calculate splits
-        uint256 rewardsAmount = (totalAmount * REWARDS_TREASURY_BPS) / 10000;
-        uint256 platformAmount = totalAmount - rewardsAmount;
-        
-        // Distribute fees via pool manager
-        poolManager.take(currency, rewardsTreasury, rewardsAmount);
-        poolManager.take(currency, platformTreasury, platformAmount);
-        
-        emit FeesDistributed(
-            msg.sender, // The calling hook
-            trader,
-            currency,
-            totalAmount,
-            rewardsAmount,
-            platformAmount
-        );
+
+    /// @notice Update split bps (only owner). Must be between 1 and 9999.
+    function updateSplitBps(uint256 _rewardsBps) external onlyOwner {
+        if (_rewardsBps == 0 || _rewardsBps >= 10000) revert InvalidBps();
+        rewardsTreasuryBps = _rewardsBps;
+        platformTreasuryBps = 10000 - _rewardsBps;
+        emit SplitBpsUpdated(_rewardsBps, 10000 - _rewardsBps);
     }
     
     /// @notice Get current treasury addresses
     function getTreasuries() external view returns (address platform, address rewards) {
         return (platformTreasury, rewardsTreasury);
+    }
+
+    /// @notice Get current split basis points
+    function getSplitBps() external view returns (uint256 rewardsBps, uint256 platformBps) {
+        rewardsBps = rewardsTreasuryBps;
+        platformBps = platformTreasuryBps;
     }
 }
