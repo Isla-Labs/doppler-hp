@@ -30,7 +30,10 @@ error OnlyMigrator();
 /// @notice Thrown when providing zero address where not allowed
 error ZeroAddress();
 
-/// @notice Disables buys when market is being or has been sunsetted
+/// @notice Thrown during unauthorized queries
+error NotAllowed();
+
+/// @notice Thrown during buy attempts when market is being or has been sunsetted
 error MarketSunset();
 
 /**
@@ -40,6 +43,10 @@ error MarketSunset();
  */
 contract UniswapV4MigratorHook is BaseHook {
     using PoolIdLibrary for PoolKey;
+
+    // ------------------------------------------
+    //  Config
+    // ------------------------------------------
 
     /// @notice Address of the Uniswap V4 Migrator contract
     address public immutable migrator;
@@ -61,10 +68,10 @@ contract UniswapV4MigratorHook is BaseHook {
     // ------------------------------------------
 
     /// @notice Chainlink ETH-USD price feed on Base
-    address public CHAINLINK_ETH_USD = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
+    address public immutable CHAINLINK_ETH_USD = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
     
     /// @notice Fallback ETH-USD price for testnet
-    uint256 public fallbackEthPriceUsd = 3000000000; // (6 decimals)
+    uint256 public immutable fallbackEthPriceUsd = 3000000000; // (6 decimals)
 
     /// @notice Dynamic fee constants
     uint256 internal constant FEE_START_TIER_1 = 500;
@@ -80,8 +87,6 @@ contract UniswapV4MigratorHook is BaseHook {
     uint256 internal constant TIER_2_THRESHOLD_USD = 5000;
     uint256 internal constant TIER_3_THRESHOLD_USD = 50000;
     uint256 internal constant SCALE_PARAMETER = 1000;
-
-    error NotAllowed();
 
     // ------------------------------------------
     //  Access
