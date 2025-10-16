@@ -40,8 +40,9 @@ contract WhitelistRegistry {
     //  Events/Errors
     // ------------------------------------------
 
-    event MarketLaunched(address indexed token, address indexed vault, bool isActive);
-    event MarketDiscontinued(address indexed token, uint256 deactivatedAt);
+    event MarketLaunched(address indexed token, address dopplerHook, bool isActive);
+    event MarketMigrated(address indexed token, address migratorHook, bool hasMigrated);
+    event MarketDiscontinued(address indexed token, address vault, uint256 deactivatedAt);
     event SunsetComplete(address indexed token, uint256 completedAt);
 
     error NotAllowed();
@@ -111,7 +112,7 @@ contract WhitelistRegistry {
             sunsetComplete: false
         });
 
-        emit MarketLaunched(token, vault, true);
+        emit MarketLaunched(token, dopplerHook, true);
     }
 
     // ------------------------------------------
@@ -125,6 +126,8 @@ contract WhitelistRegistry {
         require(!ts.hasMigrated, "Already migrated");
 
         ts.hasMigrated = true;
+
+        emit MarketMigrated(ts.token, ts.migratorHook, true);
     }
 
     function discontinueMarket(address token) external onlyMarketSunsetter {
@@ -136,7 +139,7 @@ contract WhitelistRegistry {
         ts.isActive = false;
         ts.deactivatedAt = block.timestamp;
 
-        emit MarketDiscontinued(token, block.timestamp);
+        emit MarketDiscontinued(token, ts.vault, ts.deactivatedAt);
     }
 
     // ------------------------------------------
