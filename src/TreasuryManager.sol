@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 /**
  * @title HighPotential Treasury Manager
- * @notice Canonical treasury storage and onchain fee splits
+ * @notice Treasury references and fee distribution config
  * @author Isla Labs
  * @custom:security-contact security@islalabs.co
  */
