@@ -6,6 +6,7 @@ import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { AggregatorV3Interface } from "src/interfaces/AggregatorV3Interface.sol";
 import { Hooks } from "@v4-core/libraries/Hooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
+import { PoolId, PoolIdLibrary } from "@v4-core/types/PoolId.sol";
 import { BeforeSwapDelta, toBeforeSwapDelta } from "@v4-core/types/BeforeSwapDelta.sol";
 import { BalanceDelta } from "@v4-core/types/BalanceDelta.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
@@ -28,6 +29,7 @@ struct MultiHopContext {
  * @custom:security-contact security@islalabs.co
  */
 contract UniswapV4MigratorHook is BaseHook {
+    using PoolIdLibrary for PoolKey;
 
     /// @notice Address of the Uniswap V4 Migrator contract
     address public immutable migrator;
@@ -72,13 +74,15 @@ contract UniswapV4MigratorHook is BaseHook {
     uint256 internal constant TIER_3_THRESHOLD_USD = 50000;
     uint256 internal constant SCALE_PARAMETER = 1000;
 
-    /// @notice Fee split BPS
+    /// @notice Fee split BPS: 89% for Performance Based Returns
     uint256 constant BPS = 10_000;
     uint256 constant PBR_BPS = 8900;
 
     // ------------------------------------------
     //  Events/Errors
     // ------------------------------------------
+
+    event Swap(address indexed token, uint256 sqrtPriceX96);
 
     error OnlyMigrator();
     error ZeroAddress();
@@ -200,7 +204,14 @@ contract UniswapV4MigratorHook is BaseHook {
         BalanceDelta delta,
         bytes calldata hookData
     ) internal override returns (bytes4, int128) {
-        
+
+        // Retrieve post-swap price
+        PoolId poolId = key.toId();
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+
+        // Emit swap event for indexer
+        emit Swap(Currency.unwrap(key.currency1), sqrtPriceX96);
+
         // Check direction (Player Token → ETH)
         bool isSell = !swapParams.zeroForOne;
         
