@@ -21,6 +21,7 @@ import { ProtocolFeeLibrary } from "@v4-core/libraries/ProtocolFeeLibrary.sol";
 import { SwapMath } from "@v4-core/libraries/SwapMath.sol";
 import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
+import { ITaggableFeeRouter } from "src/interfaces/ITaggableFeeRouter.sol";
 
 bytes4 constant ERC20_TRANSFER_SELECTOR = 0xa9059cbb; // transfer(address,uint256)
 
@@ -254,6 +255,8 @@ contract Doppler is BaseHook {
     int24 internal upperSlugRange;
 
     /// @notice Recipients for fee forwarding during bonding (token0/token1)
+    /// @dev Auto-routes to FeeRouter by default, which splits 89:11 for Performance Based Returns
+    /// @dev Effectively replaces bonding-stage pool fees
     address public feeRecipient0;
     address public feeRecipient1;
     bool public feeRecipientsSet;
@@ -1471,25 +1474,42 @@ contract Doppler is BaseHook {
 
     function _payout(address token, address to, uint256 amt) internal returns (bool ok) {
         if (amt == 0 || to == address(0)) return false;
+
+        // Transfer
         if (token == address(0)) {
             (ok,) = payable(to).call{ value: amt }("");
-            return ok;
-        }
-        assembly {
-            mstore(0x00, ERC20_TRANSFER_SELECTOR)
-            mstore(0x04, shl(96, to))
-            mstore(0x24, amt)
-            ok := call(gas(), token, 0, 0x00, 0x44, 0, 0x20)
-            if ok {
-                switch returndatasize()
-                case 0 { }
-                case 32 {
-                    returndatacopy(0x00, 0, 32)
-                    ok := iszero(iszero(mload(0x00)))
+        } else {
+            assembly {
+                mstore(0x00, ERC20_TRANSFER_SELECTOR)
+                mstore(0x04, shl(96, to))
+                mstore(0x24, amt)
+                ok := call(gas(), token, 0, 0x00, 0x44, 0, 0x20)
+                if ok {
+                    switch returndatasize()
+                    case 0 { }
+                    case 32 {
+                        returndatacopy(0x00, 0, 32)
+                        ok := iszero(iszero(mload(0x00)))
+                    }
+                    default { ok := 0 }
                 }
-                default { ok := 0 }
             }
         }
+
+        // Tag the deposit
+        if (ok && (to == feeRecipient0 || to == feeRecipient1)) {
+            address market = Currency.unwrap(poolKey.currency1); // PT is currency1
+            bytes32 tag = bytes32("DOPPLER_FEE");
+            if (token == address(0)) {
+                // ETH payout
+                try ITaggableFeeRouter(to).tagETHDeposit(market, amt, tag) {} catch {}
+            } else {
+                // ERC20 payout
+                try ITaggableFeeRouter(to).tagTokenDeposit(token, market, amt, tag) {} catch {}
+            }
+        }
+
+        return ok;
     }
 
     /**
