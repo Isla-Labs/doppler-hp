@@ -1,97 +1,149 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { Ownable } from "@openzeppelin/access/Ownable.sol";
-import { Ownable2Step } from "@openzeppelin/access/Ownable2Step.sol";
-
-// Token + Vault mapping
-struct TokenSet {
-    address token;
-    address vault;
-    bool isActive;
-    bool sunsetComplete;
-}
-
 /**
  * @title HighPotential Whitelist Registry
  * @notice List of verified Player Token, Player Vault combinations
  * @dev Single source of truth for HP TokenSets (Player Token, Player Vault, isActive, sunsetComplete)
  */
-contract WhitelistRegistry is Ownable2Step {
-    
-    /// @notice Admin accounts that can update system parameters
-    mapping(address => bool) public isAdmin;
+contract WhitelistRegistry {
+    /// @notice Address of the Airlock contract
+    address public immutable airlock;
 
-    /// @notice List of all TokenSets (Player Token + Player Vault combinations)
+    /// @notice Address of the AirlockMultisig contract
+    address public immutable airlockMultisig;
+
+    /// @notice Address of the MarketSunsetter contract
+    address public immutable marketSunsetter;
+
+    // ------------------------------------------
+    //  Storage
+    // ------------------------------------------
+
+    /// @notice Asset lifecycle schematics
+    struct TokenSet {
+        address token;
+        address vault;
+        address dopplerHook;
+        address migratorHook;
+        bool hasMigrated;
+        bool isActive;
+        uint256 deactivatedAt; // for +90d remigration
+        bool sunsetComplete;
+    }
+    
+    /// @notice Retrieve TokenSet from tokenAddress
     mapping(address => TokenSet) public tokenSets;
 
-    event TokenSetUpserted(address indexed token, address indexed vault, bool isActive);
-    event TokenSetDeactivated(address indexed token, address indexed vault);
-    event AdminAdded(address indexed admin);
-    event AdminRemoved(address indexed admin);
-    
-    constructor(address _owner) Ownable(_owner) {}
+    // ------------------------------------------
+    //  Events/Errors
+    // ------------------------------------------
 
-    // ==========================================
-    // MODIFIERS
-    // ==========================================
+    event MarketLaunched(address indexed token, address indexed vault, bool isActive);
+    event MarketDiscontinued(address indexed token, uint256 deactivatedAt);
+    event SunsetComplete(address indexed token, uint256 completedAt);
+
+    error NotAllowed();
+    error ZeroAddress();
+
+    // ------------------------------------------
+    //  Constructor
+    // ------------------------------------------
     
-    modifier onlyAdmin() {
-        require(isAdmin[msg.sender] || msg.sender == owner(), "Not admin or owner");
+    constructor(
+        address _airlock,
+        address _airlockMultisig, 
+        address _marketSunsetter
+    ) {
+        if (
+            address(_airlock) == address(0) || 
+            address(_airlockMultisig) == address(0) || 
+            address(_marketSunsetter) == address(0)
+        ) revert ZeroAddress();
+
+        airlock = _airlock;
+        airlockMultisig = _airlockMultisig;
+        marketSunsetter = _marketSunsetter;
+    }
+
+    // ------------------------------------------
+    //  Access Control
+    // ------------------------------------------
+
+    modifier onlyAirlock() {
+        require(msg.sender == airlock, "Not authorized");
+        _;
+    }
+    
+    modifier onlyAirlockMultisig() {
+        require(msg.sender == airlockMultisig, "Not authorized");
         _;
     }
 
-    // ==========================================
-    // UPDATE FUNCTIONS
-    // ==========================================
+    modifier onlyMarketSunsetter() {
+        require(msg.sender == marketSunsetter, "Not authorized");
+        _;
+    }
 
-    function addTokenSet(address token, address vault) external onlyAdmin {
+    // ------------------------------------------
+    //  Initialization
+    // ------------------------------------------
+
+    function addMarket(
+        address token,
+        address vault,
+        address dopplerHook,
+        address migratorHook
+    ) external onlyAirlockMultisig {
+        require(tokenSets[token].token == address(0), "Market exists");
         require(token != address(0) && vault != address(0), "Zero address");
-        tokenSets[token] = TokenSet({ token: token, vault: vault, isActive: true });
-        emit TokenSetUpserted(token, vault, true);
+        require(dopplerHook != address(0) && migratorHook != address(0), "Zero address");
+
+        tokenSets[token] = TokenSet({
+            token: token,
+            vault: vault,
+            dopplerHook: dopplerHook,
+            migratorHook: migratorHook,
+            hasMigrated: false,
+            isActive: true,
+            deactivatedAt: 0,
+            sunsetComplete: false
+        });
+
+        emit MarketLaunched(token, vault, true);
     }
 
-    function updateVault(address token, address newVault) external onlyAdmin {
-        require(newVault != address(0), "Zero address");
+    // ------------------------------------------
+    //  Upkeep
+    // ------------------------------------------
+
+    function updateMigrationStatus(address token) external onlyAirlock {
         TokenSet storage ts = tokenSets[token];
+
         require(ts.token != address(0), "Unknown token");
-        ts.vault = newVault;
-        emit TokenSetUpserted(token, newVault, ts.isActive);
+        require(!ts.hasMigrated, "Already migrated");
+
+        ts.hasMigrated = true;
     }
 
-    function deactivateTokenSet(address token) external onlyAdmin {
+    function discontinueMarket(address token) external onlyMarketSunsetter {
         TokenSet storage ts = tokenSets[token];
+
         require(ts.token != address(0), "Unknown token");
         require(ts.isActive, "Already inactive");
+
         ts.isActive = false;
-        emit TokenSetDeactivated(token, ts.vault);
+        ts.deactivatedAt = block.timestamp;
+
+        emit MarketDiscontinued(token, block.timestamp);
     }
 
-    function addAdmin(address admin) external onlyOwner {
-        require(admin != address(0), "Zero address");
-        require(!isAdmin[admin], "Already admin");
-        
-        isAdmin[admin] = true;
-        emit AdminAdded(admin);
-    }
-    
-    function removeAdmin(address admin) external onlyOwner {
-        require(isAdmin[admin], "Not admin");
-        
-        isAdmin[admin] = false;
-        emit AdminRemoved(admin);
-    }
-
-    // ==========================================
-    // CHECKER FUNCTIONS
-    // ==========================================
+    // ------------------------------------------
+    //  External View
+    // ------------------------------------------
 
     function getVaultAndStatus(address token) external view returns (address vault, bool isActive) {
         TokenSet storage ts = tokenSets[token];
         return (ts.vault, ts.isActive);
-    }
-    
-    function hasAdminAccess(address account) external view returns (bool) {
-        return isAdmin[account] || account == owner();
     }
 }

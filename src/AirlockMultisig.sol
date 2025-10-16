@@ -77,9 +77,9 @@ contract AirlockMultisig {
 
 	receive() external payable {}
 
-	// ================================
-	// Airlock-facing (kept API)
-	// ================================
+	// ------------------------------------------
+	//  Airlock-facing
+	// ------------------------------------------
 
 	/// @notice Propose/confirm/execute an arbitrary call to Airlock. First call records msg.value; confirmations must send 0.
 	function execute(bytes calldata data) external payable onlySigner returns (bytes32 id) {
@@ -122,9 +122,33 @@ contract AirlockMultisig {
 		_tryExecute(id);
 	}
 
-	// ================================
+	// ------------------------------------------
+	//  Market Initialization
+	// ------------------------------------------
+
+	/// @notice Propose/confirm/execute a WhitelistRegistry.addMarket call.
+	function addMarket(
+		address whitelistRegistry,
+		address token,
+		address vault,
+		address dopplerHook,
+		address migratorHook
+	) external onlySigner returns (bytes32 id) {
+		// addMarket(address,address,address,address)
+		bytes memory data = abi.encodeWithSignature(
+			"addMarket(address,address,address,address)",
+			token,
+			vault,
+			dopplerHook,
+			migratorHook
+		);
+		id = _proposeOrConfirm(whitelistRegistry, 0, data);
+		_tryExecute(id);
+	}
+
+	// ------------------------------------------
 	// Governance of the multisig itself (updateable)
-	// ================================
+	// ------------------------------------------
 
 	function addSigner(address newSigner) external onlySigner returns (bytes32 id) {
 		id = _proposeOrConfirm(address(this), 0, abi.encodeCall(this.selfAddSigner, (newSigner)));
@@ -163,9 +187,9 @@ contract AirlockMultisig {
 		emit DelayChanged(newDelay);
 	}
 
-	// ================================
+	// ------------------------------------------
 	// Proposal lifecycle helpers
-	// ================================
+	// ------------------------------------------
 
 	function confirm(bytes32 id) external onlySigner {
 		_confirm(id, 0, false);
@@ -186,9 +210,9 @@ contract AirlockMultisig {
 		_tryExecute(id);
 	}
 
-	// ================================
+	// ------------------------------------------
 	// Views
-	// ================================
+	// ------------------------------------------
 
 	function getSigners() external view returns (address[] memory) {
 		return signers;
@@ -207,9 +231,9 @@ contract AirlockMultisig {
 		return (p.target, p.value, p.data, p.submitTime, p.confirmations, p.executed, p.exists);
 	}
 
-	// ================================
+	// ------------------------------------------
 	// Internal
-	// ================================
+	// ------------------------------------------
 
 	function _proposeOrConfirm(address target, uint256 value, bytes memory data) internal returns (bytes32 id) {
 		id = keccak256(abi.encode(target, value, data));
