@@ -1498,14 +1498,30 @@ contract Doppler is BaseHook {
 
         // Tag the deposit
         if (ok && (to == feeRecipient0 || to == feeRecipient1)) {
-            address market = Currency.unwrap(poolKey.currency1); // PT is currency1
+            address market = Currency.unwrap(poolKey.currency1);
             bytes32 tag = bytes32("DOPPLER_FEE");
+
             if (token == address(0)) {
-                // ETH payout
-                try ITaggableFeeRouter(to).tagETHDeposit(market, amt, tag) {} catch {}
+                // ETH payout tag (ignore success)
+                (/*s*/, ) = to.call(
+                    abi.encodeWithSelector(
+                        ITaggableFeeRouter.tagETHDeposit.selector,
+                        market,
+                        amt,
+                        tag
+                    )
+                );
             } else {
-                // ERC20 payout
-                try ITaggableFeeRouter(to).tagTokenDeposit(token, market, amt, tag) {} catch {}
+                // ERC20 payout tag (ignore success)
+                (/*s*/, ) = to.call(
+                    abi.encodeWithSelector(
+                        ITaggableFeeRouter.tagTokenDeposit.selector,
+                        token,
+                        market,
+                        amt,
+                        tag
+                    )
+                );
             }
         }
 
