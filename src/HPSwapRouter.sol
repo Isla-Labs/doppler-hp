@@ -27,6 +27,7 @@ struct SwapResult {
 contract HPSwapRouter is ReentrancyGuard {
     using SafeERC20 for IERC20;
     
+    // Core dependencies
     IPoolManager public immutable poolManager;
     address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
@@ -58,7 +59,7 @@ contract HPSwapRouter is ReentrancyGuard {
     //  Events/Errors
     // ------------------------------------------
 
-    event EthUsdcPoolUpdated(bytes32 oldPoolId, bytes32 newPoolId, uint24 oldFee, uint24 newFee, int24 oldTick, int24 newTick);
+    event EthUsdcPoolUpdated(bytes32 oldPoolId, bytes32 newPoolId);
     event SweepToken(address indexed token, address indexed to, uint256 amount);
     event SweepETH(address indexed to, uint256 amount);
 
@@ -172,7 +173,7 @@ contract HPSwapRouter is ReentrancyGuard {
         ethUsdcTickSpacing = spacing;
         ethUsdcPoolId = newPoolId;
 
-        emit EthUsdcPoolUpdated(oldId, newPoolId, oldFee, fee, oldSpacing, spacing);
+        emit EthUsdcPoolUpdated(oldId, newPoolId);
     }
 
     /// @notice Emergency-only fallback; router aims to be stateless via auto-refunds

@@ -24,7 +24,7 @@ struct QuoteResult {
  * @custom:security-contact security@islalabs.co
  */
 contract HPSwapQuoter {
-    
+    // Core dependencies
     IPoolManager public immutable poolManager;
     address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
@@ -109,11 +109,13 @@ contract HPSwapQuoter {
         if (_ethUsdcPoolId != bytes32(0)) {
             (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
                 IPositionManager(positionManager).poolKeys(_ethUsdcPoolId);
+
             address c0a = Currency.unwrap(c0);
             address c1a = Currency.unwrap(c1);
             if (!(c1a == USDC && address(h) == address(0) && (c0a == ETH || c0a == WETH))) {
                 revert BadEthUsdcBinding(_ethUsdcPoolId, c0a, c1a, address(h));
             }
+            
             ethUsdcBase = c0a;
             ethUsdcFee = fee;
             ethUsdcTickSpacing = spacing;
