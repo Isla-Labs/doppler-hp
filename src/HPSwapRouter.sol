@@ -126,7 +126,7 @@ contract HPSwapRouter is ReentrancyGuard {
 
             address c0a = Currency.unwrap(c0);
             address c1a = Currency.unwrap(c1);
-            if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
+            if (!(c1a == USDC && address(h) == address(0) && (c0a == ETH_ADDR || c0a == WETH))) {
                 revert BadEthUsdcBinding(_ethUsdcPoolId, c0a, c1a, address(h));
             }
 
@@ -154,7 +154,7 @@ contract HPSwapRouter is ReentrancyGuard {
 
         address c0a = Currency.unwrap(c0);
         address c1a = Currency.unwrap(c1);
-        if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
+        if (!(c1a == USDC && address(h) == address(0) && (c0a == ETH_ADDR || c0a == WETH))) {
             revert BadEthUsdcBinding(newPoolId, c0a, c1a, address(h));
         }
 
