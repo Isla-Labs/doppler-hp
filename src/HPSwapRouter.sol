@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { ReentrancyGuard } from "openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
+import { SafeERC20 } from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
@@ -24,6 +25,7 @@ struct SwapResult {
  * @custom:security-contact security@islalabs.co
  */
 contract HPSwapRouter is ReentrancyGuard {
+    using SafeERC20 for IERC20;
     
     IPoolManager public immutable poolManager;
     address public immutable positionManager;
@@ -60,19 +62,16 @@ contract HPSwapRouter is ReentrancyGuard {
     event SweepToken(address indexed token, address indexed to, uint256 amount);
     event SweepETH(address indexed to, uint256 amount);
 
-    error NotWhitelisted();
     error ZeroAddress();
+    error NotWhitelisted();
     error InvalidAmount();
+    error InsufficientInput(uint256 expected, uint256 provided);
     error Slippage();
     error TxExpired();
     error BadRecipient();
-    error InsufficientInput(uint256 expected, uint256 provided);
-    error EthTransferFailed(uint256 amount, address to);
-    error WethTransferFailed(uint256 amount, address to);
-    error Erc20TransferFailed(address token, address to, uint256 amount);
     error BadEthUsdcBinding(bytes32 poolId, address currency0, address currency1, address hook);
-    error Unauthorized();
     error EthUsdcPoolUnavailable();
+    error Unauthorized();
 
     // ------------------------------------------
     //  Access Control
@@ -145,10 +144,13 @@ contract HPSwapRouter is ReentrancyGuard {
         }
     }
 
+    receive() external payable {}
+
     // ------------------------------------------
     //  Upkeep
     // ------------------------------------------
 
+    /// @notice Enables updateable eth/usdc pool parameters
     function rebindEthUsdc(bytes32 newPoolId) external onlyMarketOrchestrator {
         if (newPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
 
@@ -176,15 +178,16 @@ contract HPSwapRouter is ReentrancyGuard {
     /// @notice Emergency-only fallback; router aims to be stateless via auto-refunds
     function sweepToken(address token, address to, uint256 amount) external onlyMarketOrchestrator {
         if (to == address(0)) revert BadRecipient();
-        if (!IERC20(token).transfer(to, amount)) revert Erc20TransferFailed(token, to, amount);
+        IERC20(token).safeTransfer(to, amount);
         emit SweepToken(token, to, amount);
     }
 
     /// @notice Emergency-only fallback; router aims to be stateless via auto-refunds
     function sweepETH(address to, uint256 amount) external onlyMarketOrchestrator {
         if (to == address(0)) revert BadRecipient();
+
         (bool s, ) = to.call{ value: amount }("");
-        if (!s) revert EthTransferFailed(amount, to);
+        if (!s) revert();
         emit SweepETH(to, amount);
     }
 
@@ -192,8 +195,16 @@ contract HPSwapRouter is ReentrancyGuard {
     //  Entry Point (exact input)
     // ------------------------------------------
 
-    // Detects: PT<->PT (via ETH), ETH<->PT, USDC<->PT (via ETH)
-    // Pass minOut=0 or deadline=0 to disable either check.
+    /**
+     * @notice Swap entry point for exact in single
+     * @dev (ETH <> playerToken), (USDC <> playerToken), (playerToken <> playerToken)
+     * @param inputToken Address of the whitelisted token to use as currency0
+     * @param outputToken Address of the whitelisted token to use as currency1
+     * @param amountIn Total amount to swap in wei
+     * @param minOut Slippage-adjusted minimum output in wei (minOut=0 disables slippage protection)
+     * @param deadline Unix timestamp for execution deadline, e.g. block.timestamp + 600 (deadline=0 disables time bound)
+     * @return SwapResult Successful tx returns amountOut, totalGas, totalFeesEth
+     */
     function swap(
         address inputToken,
         address outputToken,
@@ -271,7 +282,7 @@ contract HPSwapRouter is ReentrancyGuard {
                 if (outIsWETH) {
                     poolManager.take(Currency.wrap(ETH), address(this), res.amountOut);
                     IWETH(WETH).deposit{ value: res.amountOut }();
-                    if (!IWETH(WETH).transfer(recipient, res.amountOut)) revert WethTransferFailed(res.amountOut, recipient);
+                    IERC20(WETH).safeTransfer(recipient, res.amountOut);
                 } else {
                     poolManager.take(Currency.wrap(ETH), recipient, res.amountOut);
                 }
@@ -331,7 +342,7 @@ contract HPSwapRouter is ReentrancyGuard {
                     poolManager.take(Currency.wrap(ETH), address(this), ethInterim);
                     IWETH(WETH).deposit{ value: ethInterim }();
                     poolManager.sync(Currency.wrap(WETH));
-                    if (!IERC20(WETH).transfer(address(poolManager), ethInterim)) revert Erc20TransferFailed(WETH, address(poolManager), ethInterim);
+                    IERC20(WETH).safeTransfer(address(poolManager), ethInterim);
                     poolManager.settle();
                 }
                 _swapExactIn(keyMid, /*zeroForOne*/ true, ethInterim, bytes(""));
@@ -407,6 +418,7 @@ contract HPSwapRouter is ReentrancyGuard {
     //  Input/Output
     // ------------------------------------------
 
+    /// @notice Calls PoolManager for swap execution
     function _swapExactIn(
         PoolKey memory key,
         bool zeroForOne,
@@ -421,14 +433,14 @@ contract HPSwapRouter is ReentrancyGuard {
         poolManager.swap(key, p, hookData);
     }
 
-    // Prepay input into PoolManager (credits this router). Always settle the exact amount.
+    /// @notice Prepay input into PoolManager
     function _settleExactIn(Currency cIn, uint256 amount) internal {
         address t = Currency.unwrap(cIn);
         if (t == ETH) {
             poolManager.settle{ value: amount }();
         } else {
             poolManager.sync(cIn);
-            if (!IERC20(t).transfer(address(poolManager), amount)) revert Erc20TransferFailed(t, address(poolManager), amount);
+            IERC20(t).safeTransfer(address(poolManager), amount);
             poolManager.settle();
         }
     }
@@ -437,49 +449,93 @@ contract HPSwapRouter is ReentrancyGuard {
     //  Internal helpers
     // ------------------------------------------
 
+    /// @notice Internal helper to check playerToken activity status
+    function _isPlayerToken(address token) internal view returns (bool) {
+        return registry.isMarketActive(token);
+    }
+
+    /// @notice Returns the router's positive credit in PoolManager
     function _managerOwed(Currency c) internal view returns (uint256) {
         int256 delta = poolManager.currencyDelta(address(this), c);
         return delta > 0 ? uint256(delta) : 0;
     }
 
-    // Prefer Permit2 if allowance exists; fall back to ERC20.transferFrom
+    /// @notice Prefer Permit2 if allowance exists; fall back to ERC20.transferFrom
     function _pullFromUser(address token, uint256 amount) internal {
         (uint160 p2Amt, uint48 p2Exp, ) = IPermit2(PERMIT2).allowance(msg.sender, token, address(this));
         bool ok = p2Amt >= uint160(amount) && (p2Exp == 0 || p2Exp >= block.timestamp);
         if (ok) {
             IPermit2(PERMIT2).transferFrom(msg.sender, address(this), uint160(amount), token);
         } else {
-            if (!IERC20(token).transferFrom(msg.sender, address(this), amount)) {
-                revert Erc20TransferFailed(token, address(this), amount);
-            }
+            IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         }
     }
 
-    // Auto-refund ETH with WETH fallback (UR-like)
+    /// @notice Auto-refund ETH with WETH fallback (UR-like)
     function _refundEthToSender(uint256 ethBase) internal {
         uint256 refund = address(this).balance - ethBase;
         if (refund > 0) {
             (bool ok, ) = msg.sender.call{ value: refund }("");
             if (!ok) {
                 IWETH(WETH).deposit{ value: refund }();
-                if (!IWETH(WETH).transfer(msg.sender, refund)) revert WethTransferFailed(refund, msg.sender);
+                IERC20(WETH).safeTransfer(msg.sender, refund);
             }
         }
     }
 
-    // Auto-refund any ERC20 input delta to sender
+    /// @notice Auto-refund any ERC20 input delta to sender
     function _refundErc20ToSender(address token, uint256 base) internal {
         uint256 bal = IERC20(token).balanceOf(address(this));
         if (bal > base) {
             uint256 delta = bal - base;
-            if (!IERC20(token).transfer(msg.sender, delta)) revert Erc20TransferFailed(token, msg.sender, delta);
+            IERC20(token).safeTransfer(msg.sender, delta);
         }
+    }
+
+    // ------------------------------------------
+    //  Fee Helpers
+    // ------------------------------------------
+
+    /// @notice Convert Uniswap v4 fee param (hundredths of a bip) to bps
+    function _v4FeeBps(uint24 feeParam) internal pure returns (uint256) {
+        return uint256(feeParam) / 100;
+    }
+
+    /// @notice Fetches dynamic fee bps from migrator hook
+    function _migratorFeeBps(address migratorHook, uint256 volumeEth) internal view returns (uint256) {
+        if (migratorHook == address(0)) return 0;
+        (uint256 feeBps, ) = IMigratorHook(migratorHook).simulateDynamicFee(volumeEth);
+        return feeBps;
+    }
+
+    /// @notice Calculates fee when charged on ETH input (exact)
+    function _feeOnEthInput(uint256 ethIn, uint256 feeBps) internal pure returns (uint256) {
+        return (ethIn * feeBps) / 10_000;
+    }
+
+    /// @notice Calculates fee when charged on ETH output (net → gross adjustment)
+    function _feeOnEthOutput(uint256 ethOutNet, uint256 feeBps) internal pure returns (uint256) {
+        uint256 denom = 10_000 - feeBps;
+        return denom == 0 ? 0 : (ethOutNet * feeBps) / denom;
+    }
+
+    /// @notice Calculates Uniswap v4 fee on USDC input
+    function _feeOnUsdcInput(uint256 usdcIn, uint256 feeBps) internal pure returns (uint256) {
+        return (usdcIn * feeBps) / 10_000;
+    }
+
+    /// @notice Fetches ETH price for approximate value conversion (USDC -> ETH)
+    function _ethPriceUsdFromToken(address pt) internal view returns (uint256) {
+        (, address migratorHook) = registry.getHooks(pt);
+        if (migratorHook == address(0)) return 0;
+        return IMigratorHook(migratorHook).quoteEthPriceUsd(); // 6 decimals
     }
 
     // ------------------------------------------
     //  PoolKey Construction
     // ------------------------------------------
 
+    /// @notice Detect bonding status and automatically construct poolKey for playerToken
     function _playerPoolKey(address pt) internal view returns (PoolKey memory key, bool hasMigrated) {
         if (!registry.isMarketActive(pt)) revert NotWhitelisted();
 
@@ -499,6 +555,7 @@ contract HPSwapRouter is ReentrancyGuard {
         }
     }
 
+    /// @notice Automatically construct poolKey for ETH/USDC (derived from Uniswap v4 poolId)
     function _ethUsdcKey() internal view returns (PoolKey memory key) {
         key = PoolKey({
             currency0: Currency.wrap(ethUsdcBase),
@@ -508,65 +565,4 @@ contract HPSwapRouter is ReentrancyGuard {
             tickSpacing: ethUsdcTickSpacing
         });
     }
-
-    // ------------------------------------------
-    //  Fee Helpers
-    // ------------------------------------------
-
-    // Uniswap v4 fee param is hundredths of a bip; convert to bps
-    function _v4FeeBps(uint24 feeParam) internal pure returns (uint256) {
-        return uint256(feeParam) / 100;
-    }
-
-    // Dynamic fee bps from migrator hook (ignores ethPriceUsd here)
-    function _migratorFeeBps(address migratorHook, uint256 volumeEth) internal view returns (uint256) {
-        if (migratorHook == address(0)) return 0;
-        (uint256 feeBps, ) = IMigratorHook(migratorHook).simulateDynamicFee(volumeEth);
-        return feeBps;
-    }
-
-    // Fee when charged on ETH input (exact)
-    function _feeOnEthInput(uint256 ethIn, uint256 feeBps) internal pure returns (uint256) {
-        return (ethIn * feeBps) / 10_000;
-    }
-
-    // Fee when charged on ETH output (net → gross adjustment)
-    function _feeOnEthOutput(uint256 ethOutNet, uint256 feeBps) internal pure returns (uint256) {
-        uint256 denom = 10_000 - feeBps;
-        return denom == 0 ? 0 : (ethOutNet * feeBps) / denom;
-    }
-
-    // Uniswap fee on USDC input (USDC 6d → reported as USDC)
-    function _feeOnUsdcInput(uint256 usdcIn, uint256 feeBps) internal pure returns (uint256) {
-        return (usdcIn * feeBps) / 10_000;
-    }
-
-    function _ethPriceUsdFromToken(address pt) internal view returns (uint256) {
-        (, address migratorHook) = registry.getHooks(pt);
-        if (migratorHook == address(0)) return 0;
-        return IMigratorHook(migratorHook).quoteEthPriceUsd(); // 6 decimals
-    }
-
-    // ------------------------------------------
-    //  Helpers
-    // ------------------------------------------
-
-    function _isPlayerToken(address token) internal view returns (bool) {
-        return registry.isMarketActive(token);
-    }
-
-    function hasPermit2Allowance(address owner, address token, uint256 needed)
-        external
-        view
-        returns (bool ok, uint160 amount, uint48 expiration)
-    {
-        (amount, expiration, ) = IPermit2(PERMIT2).allowance(owner, token, address(this));
-        ok = amount >= uint160(needed) && (expiration == 0 || expiration >= block.timestamp);
-    }
-
-    function hasErc20Allowance(address owner, address token, uint256 needed) external view returns (bool) {
-        return IERC20(token).allowance(owner, address(this)) >= needed;
-    }
-
-    receive() external payable {}
 }
