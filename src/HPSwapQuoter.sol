@@ -10,13 +10,12 @@ import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
 import { IV4Quoter, MultiHopContext, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
+/// @notice return schema for successful quote
 struct QuoteResult {
     uint256 amountOut;     // final output for the full route, including fee deductions
     uint256 gasEstimate;   // sum of gas estimates from the quoter for the hops
     uint256 totalFeesEth;  // all fees, ETH-denominated (wei)
 }
-
-error NotWhitelisted();
 
 /**
  * @title HP Swap Quoter
@@ -25,12 +24,16 @@ error NotWhitelisted();
  * @custom:security-contact security@islalabs.co
  */
 contract HPSwapQuoter {
-    // Core dependencies
+    
     IPoolManager public immutable poolManager;
     address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
     IV4Quoter public immutable quoter;
     address public immutable marketOrchestrator;
+
+    // ------------------------------------------
+    //  Pool Detection Config
+    // ------------------------------------------
 
     // Tokens and params
     address public immutable USDC;
@@ -45,10 +48,27 @@ contract HPSwapQuoter {
     uint24 public ethUsdcFee;
     int24 public ethUsdcTickSpacing;
 
+    // ------------------------------------------
+    //  Events/Errors
+    // ------------------------------------------
+
+    error NotWhitelisted();
+    error BadEthUsdcBinding(bytes32 poolId, address currency0, address currency1, address hook);
+    error Unauthorized();
+    error EthUsdcPoolUnavailable();
+
+    // ------------------------------------------
+    //  Access Control
+    // ------------------------------------------
+
     modifier onlyMarketOrchestrator() {
-        require(msg.sender == marketOrchestrator, "Not authorized");
+        if (msg.sender != marketOrchestrator) revert Unauthorized();
         _;
     }
+
+    // ------------------------------------------
+    //  Constructor
+    // ------------------------------------------
 
     constructor(
         IPoolManager _poolManager,
@@ -73,14 +93,25 @@ contract HPSwapQuoter {
 
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
             IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
-
-        require(Currency.unwrap(c0) == ETH_ADDR && Currency.unwrap(c1) == USDC && address(h) == address(0), "BAD_ETH_USDC");
-        
-        ethUsdcFee = fee;
-        ethUsdcTickSpacing = spacing;
-
-        ethUsdcPoolId = ethUsdcPoolId_;
+        if (ethUsdcPoolId_ != bytes32(0)) {
+            address c0a = Currency.unwrap(c0);
+            address c1a = Currency.unwrap(c1);
+            if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
+                revert BadEthUsdcBinding(ethUsdcPoolId_, c0a, c1a, address(h));
+            }
+            ethUsdcFee = fee;
+            ethUsdcTickSpacing = spacing;
+            ethUsdcPoolId = ethUsdcPoolId_;
+        } else {
+            ethUsdcFee = 0;
+            ethUsdcTickSpacing = 0;
+            ethUsdcPoolId = bytes32(0);
+        }
     }
+
+    // ------------------------------------------
+    //  Upkeep
+    // ------------------------------------------
 
     function rebindEthUsdc(bytes32 newPoolId) external onlyMarketOrchestrator {
         // Retrieve poolKey from poolId
@@ -94,7 +125,10 @@ contract HPSwapQuoter {
         ethUsdcPoolId = newPoolId;
     }
 
-    // Main quote: detects intent and returns amountOut + summed gasEstimate + fee estimates.
+    // ------------------------------------------
+    //  Entry Point
+    // ------------------------------------------
+
     function quote(
         address inputToken,
         address outputToken,
@@ -181,6 +215,7 @@ contract HPSwapQuoter {
         // PT -> USDC (two hops via ETH)
         if (inIsPT && outIsUSDC) {
             // First hop: PT(in) -> ETH (mark multihop, isUsdc=true) [ETH output]
+            if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
             (PoolKey memory key1, bool migratedIn, address dopplerIn, address migratorIn) = _playerKeyAndHooks(inputToken);
             (uint256 ethOut, uint256 gas1) =
                 _quoteSingle(key1, /*zeroForOne*/ false, amountIn, /*isMultiHopFirst=*/ true, /*isUsdc=*/ true);
@@ -207,6 +242,7 @@ contract HPSwapQuoter {
         // USDC -> PT (two hops via ETH)
         if (outIsPT && inIsUSDC) {
             // First hop: USDC -> ETH (single hop) [USDC input → Uniswap fee]
+            if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
             PoolKey memory key1 = _ethUsdcKey();
             (uint256 ethOut, uint256 gas1) =
                 _quoteSingle(key1, /*zeroForOne*/ false, amountIn, /*isMultiHopFirst=*/ false, /*isUsdc=*/ false);
@@ -240,7 +276,9 @@ contract HPSwapQuoter {
         revert NotWhitelisted();
     }
 
-    // ---- internals ----
+    // ------------------------------------------
+    //  Input/Output
+    // ------------------------------------------
 
     function _quoteSingle(
         PoolKey memory key,
@@ -261,6 +299,10 @@ contract HPSwapQuoter {
             })
         );
     }
+
+    // ------------------------------------------
+    //  PoolKey Construction
+    // ------------------------------------------
 
     function _playerKeyAndHooks(address pt)
         internal
@@ -295,11 +337,9 @@ contract HPSwapQuoter {
         });
     }
 
-    function _isPlayerToken(address token) internal view returns (bool) {
-        return registry.isMarketActive(token);
-    }
-
-    // ---- fee helpers ----
+    // ------------------------------------------
+    //  Fee Helpers
+    // ------------------------------------------
 
     // Uniswap v4 fee param is hundredths of a bip; convert to bps
     function _v4FeeBps(uint24 feeParam) internal pure returns (uint256) {
@@ -327,6 +367,14 @@ contract HPSwapQuoter {
     // Uniswap fee on USDC input (reported in USDC, 6 decimals for Base USDC)
     function _feeOnUsdcInput(uint256 usdcIn, uint256 feeBps) internal pure returns (uint256) {
         return (usdcIn * feeBps) / 10_000;
+    }
+
+    // ------------------------------------------
+    //  Helpers
+    // ------------------------------------------
+
+    function _isPlayerToken(address token) internal view returns (bool) {
+        return registry.isMarketActive(token);
     }
 
     function _ethPriceUsdFromToken(address pt) internal view returns (uint256) {

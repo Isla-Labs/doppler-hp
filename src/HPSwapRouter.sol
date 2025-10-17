@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-// Core
 import { ReentrancyGuard } from "openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
 import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { IHooks } from "@v4-core/interfaces/IHooks.sol";
@@ -11,17 +10,12 @@ import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
 import { IERC20, IWETH, IPermit2, MultiHopContext, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
+/// @notice return schema for successful swap
 struct SwapResult {
     uint256 amountOut;      // final output for the full route, including fee deductions
     uint256 totalGas;       // sum of gas paid for all hops
     uint256 totalFeesEth;   // all fees, ETH-denominated (wei)
 }
-
-// Errors
-error NotWhitelisted();
-error InvalidAmount();
-error Slippage();
-error Expired;
 
 /**
  * @title HP Swap Router
@@ -30,10 +24,15 @@ error Expired;
  * @custom:security-contact security@islalabs.co
  */
 contract HPSwapRouter is ReentrancyGuard {
+    
     IPoolManager public immutable poolManager;
     address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
     address public immutable marketOrchestrator;
+
+    // ------------------------------------------
+    //  Pool Detection Config
+    // ------------------------------------------
 
     // ETH native sentinel
     address public constant ETH_ADDR = address(0);
@@ -54,18 +53,30 @@ contract HPSwapRouter is ReentrancyGuard {
     uint24 public ethUsdcFee;
     int24 public ethUsdcTickSpacing;
 
-    event PtToPt(
-        address indexed sender,
-        address indexed ptIn,
-        address indexed ptOut,
-        uint256 amountIn,
-        uint256 amountOut,
-        address recipient
-    );
+    // ------------------------------------------
+    //  Events/Errors
+    // ------------------------------------------
 
-    event EthUsdcRebound(bytes32 oldPoolId, bytes32 newPoolId, uint24 oldFee, uint24 newFee, int24 oldTick, int24 newTick);
+    event EthUsdcPoolUpdated(bytes32 oldPoolId, bytes32 newPoolId, uint24 oldFee, uint24 newFee, int24 oldTick, int24 newTick);
     event SweepToken(address indexed token, address indexed to, uint256 amount);
     event SweepETH(address indexed to, uint256 amount);
+
+    error NotWhitelisted();
+    error InvalidAmount();
+    error Slippage();
+    error Expired;
+    error BadRecipient();
+    error InsufficientInput(uint256 expected, uint256 provided);
+    error EthTransferFailed(uint256 amount, address to);
+    error WethTransferFailed(uint256 amount, address to);
+    error Erc20TransferFailed(address token, address to, uint256 amount);
+    error BadEthUsdcBinding(bytes32 poolId, address currency0, address currency1, address hook);
+    error Unauthorized();
+    error EthUsdcPoolUnavailable();
+
+    // ------------------------------------------
+    //  Access Control
+    // ------------------------------------------
 
     modifier checkDeadline(uint256 deadline) {
         if (deadline != 0 && block.timestamp > deadline) revert Expired();
@@ -73,9 +84,13 @@ contract HPSwapRouter is ReentrancyGuard {
     }
 
     modifier onlyMarketOrchestrator() {
-        require(msg.sender == marketOrchestrator, "Not authorized");
+        if (msg.sender != marketOrchestrator) revert Unauthorized();
         _;
     }
+
+    // ------------------------------------------
+    //  Constructor
+    // ------------------------------------------
 
     constructor(
         IPoolManager _poolManager,
@@ -101,23 +116,37 @@ contract HPSwapRouter is ReentrancyGuard {
         WETH = _weth;
         positionManager = positionManager_;
 
-        (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
-            IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
-
-        require(Currency.unwrap(c0) == ETH_ADDR && Currency.unwrap(c1) == USDC && address(h) == address(0), "BAD_ETH_USDC");
-        
-        ethUsdcFee = fee;
-        ethUsdcTickSpacing = spacing;
-        ethUsdcPoolId = ethUsdcPoolId_;
+        if (ethUsdcPoolId_ != bytes32(0)) {
+            (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
+                IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
+            address c0a = Currency.unwrap(c0);
+            address c1a = Currency.unwrap(c1);
+            if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
+                revert BadEthUsdcBinding(ethUsdcPoolId_, c0a, c1a, address(h));
+            }
+            ethUsdcFee = fee;
+            ethUsdcTickSpacing = spacing;
+            ethUsdcPoolId = ethUsdcPoolId_;
+        } else {
+            ethUsdcFee = 0;
+            ethUsdcTickSpacing = 0;
+            ethUsdcPoolId = bytes32(0);
+        }
     }
 
-    // ============ Admin ============
+    // ------------------------------------------
+    //  Upkeep
+    // ------------------------------------------
 
     function rebindEthUsdc(bytes32 newPoolId) external onlyMarketOrchestrator {
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
             IPositionManager(positionManager).poolKeys(newPoolId);
 
-        require(Currency.unwrap(c0) == ETH_ADDR && Currency.unwrap(c1) == USDC && address(h) == address(0), "BAD_ETH_USDC");
+        address c0a = Currency.unwrap(c0);
+        address c1a = Currency.unwrap(c1);
+        if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
+            revert BadEthUsdcBinding(newPoolId, c0a, c1a, address(h));
+        }
 
         bytes32 oldId = ethUsdcPoolId;
         uint24 oldFee = ethUsdcFee;
@@ -127,24 +156,27 @@ contract HPSwapRouter is ReentrancyGuard {
         ethUsdcTickSpacing = spacing;
         ethUsdcPoolId = newPoolId;
 
-        emit EthUsdcRebound(oldId, newPoolId, oldFee, fee, oldSpacing, spacing);
+        emit EthUsdcPoolUpdated(oldId, newPoolId, oldFee, fee, oldSpacing, spacing);
     }
 
-    // Emergency-only fallback; router aims to be stateless via auto-refunds
+    /// @notice Emergency-only fallback; router aims to be stateless via auto-refunds
     function sweepToken(address token, address to, uint256 amount) external onlyMarketOrchestrator {
-        require(to != address(0), "bad to");
-        require(IERC20(token).transfer(to, amount), "sweep token");
+        if (to == address(0)) revert BadRecipient();
+        if (!IERC20(token).transfer(to, amount)) revert Erc20TransferFailed(token, to, amount);
         emit SweepToken(token, to, amount);
     }
 
+    /// @notice Emergency-only fallback; router aims to be stateless via auto-refunds
     function sweepETH(address to, uint256 amount) external onlyMarketOrchestrator {
-        require(to != address(0), "bad to");
+        if (to == address(0)) revert BadRecipient();
         (bool s, ) = to.call{ value: amount }("");
-        require(s, "sweep eth");
+        if (!s) revert EthTransferFailed(amount, to);
         emit SweepETH(to, amount);
     }
 
-    // ============ Simple API (internals handle pipeline + hardening) ============
+    // ------------------------------------------
+    //  Entry Point (exact input)
+    // ------------------------------------------
 
     // Detects: PT<->PT (via ETH), ETH<->PT, USDC<->PT (via ETH)
     // Pass minOut=0 or deadline=0 to disable either check.
@@ -156,12 +188,12 @@ contract HPSwapRouter is ReentrancyGuard {
         address recipient,
         uint256 deadline
     ) external payable checkDeadline(deadline) nonReentrant returns (SwapResult memory res) {
-        require(recipient != address(0), "bad recipient");
+        if (recipient == address(0)) revert BadRecipient();
         if (amountIn == 0) revert InvalidAmount();
 
         // Accept ETH overpay; settle exact; refund delta at end
         uint256 expectedMin = (inputToken == ETH_ADDR) ? amountIn : 0;
-        require(msg.value >= expectedMin, "insufficient msg.value");
+        if (msg.value < expectedMin) revert InsufficientInput(expectedMin, msg.value);
 
         // Ephemeral baselines (UR-like statelessness)
         uint256 ethBase = address(this).balance - msg.value;
@@ -209,7 +241,6 @@ contract HPSwapRouter is ReentrancyGuard {
                 }
             }
 
-            emit PtToPt(msg.sender, inputToken, outputToken, amountIn, res.amountOut, recipient);
         } else if (inIsPT && outIsETH) {
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
             _settleExactIn(Currency.wrap(inputToken), amountIn);
@@ -238,6 +269,7 @@ contract HPSwapRouter is ReentrancyGuard {
             }
         } else if (inIsPT && outIsUSDC) {
             // PT -> ETH (mark isUsdc=true to disable fee skip on first hop)
+            if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
             PoolKey memory keyMid = _ethUsdcKey();
 
@@ -262,6 +294,7 @@ contract HPSwapRouter is ReentrancyGuard {
             }
         } else if (outIsPT && inIsUSDC) {
             // USDC -> ETH -> PT
+            if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
             PoolKey memory keyMid = _ethUsdcKey();
             (PoolKey memory keyOut, bool migratedOut) = _playerPoolKey(outputToken);
 
@@ -303,7 +336,9 @@ contract HPSwapRouter is ReentrancyGuard {
         res.totalGas = gasStart - gasleft();
     }
 
-    // ============ Internal I/O and helpers ============
+    // ------------------------------------------
+    //  Input/Output
+    // ------------------------------------------
 
     function _swapExactIn(
         PoolKey memory key,
@@ -326,10 +361,14 @@ contract HPSwapRouter is ReentrancyGuard {
             poolManager.settle{ value: amount }();
         } else {
             poolManager.sync(cIn);
-            require(IERC20(t).transfer(address(poolManager), amount), "erc20->pm");
+            if (!IERC20(t).transfer(address(poolManager), amount)) revert Erc20TransferFailed(t, address(poolManager), amount);
             poolManager.settle();
         }
     }
+
+    // ------------------------------------------
+    //  Internal helpers
+    // ------------------------------------------
 
     function _managerOwed(Currency c) internal view returns (uint256) {
         int256 delta = poolManager.currencyDelta(address(this), c);
@@ -343,7 +382,9 @@ contract HPSwapRouter is ReentrancyGuard {
         if (ok) {
             IPermit2(PERMIT2).transferFrom(msg.sender, address(this), uint160(amount), token);
         } else {
-            require(IERC20(token).transferFrom(msg.sender, address(this), amount), "transferFrom");
+            if (!IERC20(token).transferFrom(msg.sender, address(this), amount)) {
+                revert Erc20TransferFailed(token, address(this), amount);
+            }
         }
     }
 
@@ -354,7 +395,7 @@ contract HPSwapRouter is ReentrancyGuard {
             (bool ok, ) = msg.sender.call{ value: refund }("");
             if (!ok) {
                 IWETH(WETH).deposit{ value: refund }();
-                require(IWETH(WETH).transfer(msg.sender, refund), "weth refund");
+                if (!IWETH(WETH).transfer(msg.sender, refund)) revert WethTransferFailed(refund, msg.sender);
             }
         }
     }
@@ -364,11 +405,13 @@ contract HPSwapRouter is ReentrancyGuard {
         uint256 bal = IERC20(token).balanceOf(address(this));
         if (bal > base) {
             uint256 delta = bal - base;
-            require(IERC20(token).transfer(msg.sender, delta), "erc20 refund");
+            if (!IERC20(token).transfer(msg.sender, delta)) revert Erc20TransferFailed(token, msg.sender, delta);
         }
     }
 
-    // ============ PoolKey builders / fees / views ============
+    // ------------------------------------------
+    //  PoolKey Construction
+    // ------------------------------------------
 
     function _playerPoolKey(address pt) internal view returns (PoolKey memory key, bool hasMigrated) {
         if (!registry.isMarketActive(pt)) revert NotWhitelisted();
@@ -398,6 +441,10 @@ contract HPSwapRouter is ReentrancyGuard {
             tickSpacing: ethUsdcTickSpacing
         });
     }
+
+    // ------------------------------------------
+    //  Fee Helpers
+    // ------------------------------------------
 
     // Uniswap v4 fee param is hundredths of a bip; convert to bps
     function _v4FeeBps(uint24 feeParam) internal pure returns (uint256) {
@@ -432,6 +479,10 @@ contract HPSwapRouter is ReentrancyGuard {
         if (migratorHook == address(0)) return 0;
         return IMigratorHook(migratorHook).quoteEthPriceUsd(); // 6 decimals
     }
+
+    // ------------------------------------------
+    //  Helpers
+    // ------------------------------------------
 
     function _isPlayerToken(address token) internal view returns (bool) {
         return registry.isMarketActive(token);
