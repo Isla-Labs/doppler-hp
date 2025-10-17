@@ -81,7 +81,7 @@ contract WhitelistRegistry {
         airlock = airlock_;
         airlockMultisig = airlockMultisig_;
         marketSunsetter = marketSunsetter_;
-        
+
         initialized = true;
     }
 
@@ -170,5 +170,14 @@ contract WhitelistRegistry {
     function isAuthorizedHookFor(address token, address hook) external view returns (bool) {
         TokenSet storage ts = tokenSets[token];
         return hook == ts.dopplerHook || hook == ts.migratorHook;
+    }
+
+    function getHooks(address token) external view returns (address dopplerHook, address migratorHook) {
+        TokenSet storage ts = tokenSets[token];
+        return (ts.dopplerHook, ts.migratorHook);
+    }
+
+    function hasMigrated(address token) external view returns (bool) {
+        return tokenSets[token].hasMigrated;
     }
 }

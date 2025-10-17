@@ -6,57 +6,9 @@ import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { IHooks } from "@v4-core/interfaces/IHooks.sol";
-
-// Minimal Registry view
-interface IWhitelistRegistry {
-    function tokenSets(address token) external view returns (
-        address tokenAddr,
-        address vault,
-        address dopplerHook,
-        address migratorHook,
-        bool hasMigrated,
-        bool isActive,
-        uint256 deactivatedAt,
-        bool sunsetComplete
-    );
-    function getVaultAndStatus(address token) external view returns (address vault, bool isActive);
-    function hasAdminAccess(address account) external view returns (bool);
-}
-
-// V4 Quoter (minimal)
-interface IV4Quoter {
-    struct QuoteExactSingleParams {
-        PoolKey poolKey;
-        bool zeroForOne;
-        uint256 exactAmount;
-        bytes hookData;
-    }
-    function quoteExactInputSingle(QuoteExactSingleParams calldata params)
-        external
-        returns (uint256 amountOut, uint256 gasEstimate);
-}
-
-// Doppler hook interface to fetch PoolKey
-interface IDopplerHook {
-    function poolKey() external view returns (PoolKey memory);
-}
-
-// Migrator hook (for price + dynamic fee)
-interface IMigratorHook {
-    function simulateDynamicFee(uint256 volumeEth)
-        external
-        view
-        returns (uint256 feeBps, uint256 ethPriceUsd);
-    function quoteEthPriceUsd() external view returns (uint256);
-}
-
-// Multi-hop context (must match router/hook’s layout)
-struct MultiHopContext {
-    bool isMultiHop;
-    bool isUsdc;
-}
-
-error NotWhitelisted();
+import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
+import { IV4Quoter, MultiHopContext } from "src/interfaces/IUtilities.sol";
+import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
 struct QuoteResult {
     uint256 amountOut;     // final output for the full route, including fee deductions
@@ -64,11 +16,14 @@ struct QuoteResult {
     uint256 totalFeesEth;  // all fees, ETH-denominated (wei)
 }
 
+error NotWhitelisted();
+
 contract HPSwapQuoter {
     // Core dependencies
     IPoolManager public immutable poolManager;
     IWhitelistRegistry public immutable registry;
     IV4Quoter public immutable quoter;
+    address public immutable marketOrchestrator;
 
     // Tokens and params
     address public immutable USDC;
@@ -82,28 +37,37 @@ contract HPSwapQuoter {
     uint24 public ethUsdcFee;
     int24 public ethUsdcTickSpacing;
 
+    modifier onlyMarketOrchestrator() {
+        require(msg.sender == marketOrchestrator, "Not authorized");
+        _;
+    }
+
     constructor(
         IPoolManager _poolManager,
         IWhitelistRegistry _registry,
         IV4Quoter _quoter,
+        address _marketOrchestrator,
         address _usdc,
         uint24 _ethUsdcFee,
         int24 _ethUsdcTickSpacing
     ) {
         require(address(_poolManager) != address(0) && address(_registry) != address(0), "bad core");
         require(address(_quoter) != address(0), "bad quoter");
+        require(address(_marketOrchestrator) != address(0), "bad orchestrator");
         require(_usdc != address(0), "bad usdc");
+
         poolManager = _poolManager;
         registry = _registry;
         quoter = _quoter;
+        marketOrchestrator = _marketOrchestrator;
+
         USDC = _usdc;
         ethUsdcFee = _ethUsdcFee;
         ethUsdcTickSpacing = _ethUsdcTickSpacing;
     }
 
     // Admin setter for ETH/USDC params (same policy as router)
-    function setEthUsdcParams(uint24 fee, int24 tickSpacing) external {
-        require(registry.hasAdminAccess(msg.sender), "Not admin");
+    function setEthUsdcParams(uint24 fee, int24 tickSpacing) external onlyMarketOrchestrator {
         ethUsdcFee = fee;
         ethUsdcTickSpacing = tickSpacing;
     }
@@ -252,13 +216,6 @@ contract HPSwapQuoter {
         revert NotWhitelisted();
     }
 
-    // Convenience: compute minOut from expectedOut and slippage bps
-    function minOutFromBps(uint256 expectedOut, uint16 slippageBps) external pure returns (uint256) {
-        if (expectedOut == 0) return 0;
-        require(slippageBps <= 10_000, "bps>100%");
-        return (expectedOut * (10_000 - slippageBps)) / 10_000;
-    }
-
     // ---- internals ----
 
     function _quoteSingle(
@@ -286,17 +243,10 @@ contract HPSwapQuoter {
         view
         returns (PoolKey memory key, bool hasMigrated, address dopplerHook, address migratorHook)
     {
-        (
-            , /*tokenAddr*/,
-            , /*vault*/,
-            dopplerHook,
-            migratorHook,
-            hasMigrated,
-            bool isActive,
-            , /*deactivatedAt*/
-            /*sunsetComplete*/
-        ) = registry.tokenSets(pt);
-        if (!isActive) revert NotWhitelisted();
+        if (!registry.isMarketActive(pt)) revert NotWhitelisted();
+
+        hasMigrated = registry.hasMigrated(pt);
+        (dopplerHook, migratorHook) = registry.getHooks(pt);
 
         if (!hasMigrated) {
             key = IDopplerHook(dopplerHook).poolKey();
@@ -322,8 +272,7 @@ contract HPSwapQuoter {
     }
 
     function _isPlayerToken(address token) internal view returns (bool) {
-        (, bool isActive) = registry.getVaultAndStatus(token);
-        return isActive;
+        return registry.isMarketActive(token);
     }
 
     // ---- fee helpers ----
@@ -357,7 +306,7 @@ contract HPSwapQuoter {
     }
 
     function _ethPriceUsdFromToken(address pt) internal view returns (uint256) {
-        ( , , , address migratorHook, , , , , ) = registry.tokenSets(pt);
+        (, address migratorHook) = registry.getHooks(pt);
         require(migratorHook != address(0), "no migrator");
         return IMigratorHook(migratorHook).quoteEthPriceUsd(); // 6 decimals
     }

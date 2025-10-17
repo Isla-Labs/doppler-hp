@@ -6,49 +6,14 @@ import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
+import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
+import { IERC20, IPermit2, MultiHopContext } from "src/interfaces/IUtilities.sol";
+import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
-// Minimal Registry view
-interface IWhitelistRegistry {
-    function tokenSets(address token) external view returns (
-        address tokenAddr,
-        address vault,
-        address dopplerHook,
-        address migratorHook,
-        bool hasMigrated,
-        bool isActive,
-        uint256 deactivatedAt,
-        bool sunsetComplete
-    );
-    function getVaultAndStatus(address token) external view returns (address vault, bool isActive);
-    function hasAdminAccess(address account) external view returns (bool);
-}
-
-// Minimal ERC20
-interface IERC20 {
-    function balanceOf(address) external view returns (uint256);
-    function allowance(address owner, address spender) external view returns (uint256);
-    function transfer(address,uint256) external returns (bool);
-    function transferFrom(address,address,uint256) external returns (bool);
-}
-
-// Permit2 (minimal)
-interface IPermit2 {
-    function allowance(address owner, address token, address spender)
-        external
-        view
-        returns (uint160 amount, uint48 expiration, uint48 nonce);
-    function transferFrom(address from, address to, uint160 amount, address token) external;
-}
-
-// Doppler hook interface to fetch PoolKey
-interface IDopplerHook {
-    function poolKey() external view returns (PoolKey memory);
-}
-
-// Multi-hop context (must match hook’s layout)
-struct MultiHopContext {
-    bool isMultiHop;
-    bool isUsdc;
+struct SwapResult {
+    uint256 amountOut;      // final output for the full route, including fee deductions
+    uint256 totalGas;       // sum of gas paid for all hops
+    uint256 totalFeesEth;   // all fees, ETH-denominated (wei)
 }
 
 // Errors
@@ -57,10 +22,10 @@ error InvalidAmount();
 error Slippage();
 error Expired;
 
-// Enhanced HP router
-contract HPSwapRouter2 {
+contract HPSwapRouter {
     IPoolManager public immutable poolManager;
     IWhitelistRegistry public immutable registry;
+    address public immutable marketOrchestrator;
 
     // ETH native sentinel
     address public constant ETH_ADDR = address(0);
@@ -93,18 +58,28 @@ contract HPSwapRouter2 {
         _;
     }
 
+    modifier onlyMarketOrchestrator() {
+        require(msg.sender == marketOrchestrator, "Not authorized");
+        _;
+    }
+
     constructor(
         IPoolManager _poolManager,
         IWhitelistRegistry _registry,
+        address _marketOrchestrator,
         address _usdc,
         uint24 _ethUsdcFee,
         int24 _ethUsdcTickSpacing
     ) {
         if (address(_poolManager) == address(0)) revert();
         if (address(_registry) == address(0)) revert();
+        if (_marketOrchestrator == address(0)) revert();
         if (_usdc == address(0)) revert();
+
         poolManager = _poolManager;
         registry = _registry;
+        marketOrchestrator = _marketOrchestrator;
+
         USDC = _usdc;
         ethUsdcFee = _ethUsdcFee;
         ethUsdcTickSpacing = _ethUsdcTickSpacing;
@@ -112,8 +87,7 @@ contract HPSwapRouter2 {
 
     // ============ Admin ============
 
-    function setEthUsdcParams(uint24 fee, int24 tickSpacing) external {
-        require(registry.hasAdminAccess(msg.sender), "Not admin");
+    function setEthUsdcParams(uint24 fee, int24 tickSpacing) external onlyMarketOrchestrator {
         ethUsdcFee = fee;
         ethUsdcTickSpacing = tickSpacing;
     }
@@ -129,8 +103,9 @@ contract HPSwapRouter2 {
         uint256 minOut,
         address recipient,
         uint256 deadline
-    ) external payable checkDeadline(deadline) {
+    ) external payable checkDeadline(deadline) returns (SwapResult memory res) {
         if (amountIn == 0) revert InvalidAmount();
+        uint256 gasStart = gasleft();
 
         bool inIsPT = _isPlayerToken(inputToken);
         bool outIsPT = _isPlayerToken(outputToken);
@@ -143,109 +118,142 @@ contract HPSwapRouter2 {
             _pullFromUser(inputToken, amountIn);
         }
 
-        uint256 outAmount;
         if (inIsPT && outIsPT) {
-            outAmount = _routePtToPt(inputToken, outputToken, amountIn, recipient);
-            emit PtToPt(msg.sender, inputToken, outputToken, amountIn, outAmount, recipient);
+            // First hop PT(in) -> ETH
+            (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
+            _settleExactIn(Currency.wrap(inputToken), amountIn);
+            bytes memory hop1 = abi.encode(MultiHopContext({ isMultiHop: true, isUsdc: false }));
+            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, hop1);
+
+            uint256 ethInterim = _managerOwed(Currency.wrap(ETH_ADDR));
+            // Fee on ETH output (first hop): skip if migratedIn (router-gated multihop), else 3%
+            if (!migratedIn) {
+                res.totalFeesEth += _feeOnEthOutput(ethInterim, 300);
+            }
+
+            // Second hop ETH -> PT(out)
+            (PoolKey memory keyOut, bool migratedOut) = _playerPoolKey(outputToken);
+            if (ethInterim > 0) _swapExactIn(keyOut, /*zeroForOne*/ true, ethInterim, bytes(""));
+
+            res.amountOut = _managerOwed(Currency.wrap(outputToken));
+            if (res.amountOut != 0) {
+                poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
+            }
+
+            // Fee on ETH input (second hop)
+            if (ethInterim > 0) {
+                if (migratedOut) {
+                    uint256 bps = _migratorFeeBps(address(keyOut.hooks), ethInterim);
+                    res.totalFeesEth += _feeOnEthInput(ethInterim, bps);
+                } else {
+                    res.totalFeesEth += _feeOnEthInput(ethInterim, 300);
+                }
+            }
+
+            emit PtToPt(msg.sender, inputToken, outputToken, amountIn, res.amountOut, recipient);
         } else if (inIsPT && outIsETH) {
-            outAmount = _routePtToEth(inputToken, amountIn, recipient);
+            (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
+            _settleExactIn(Currency.wrap(inputToken), amountIn);
+            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, bytes(""));
+            res.amountOut = _managerOwed(Currency.wrap(ETH_ADDR));
+            if (res.amountOut != 0) {
+                poolManager.take(Currency.wrap(ETH_ADDR), recipient, res.amountOut);
+            }
+            // Fee on ETH output
+            if (migratedIn) {
+                uint256 bps = _migratorFeeBps(address(keyIn.hooks), res.amountOut);
+                res.totalFeesEth += _feeOnEthOutput(res.amountOut, bps);
+            } else {
+                res.totalFeesEth += _feeOnEthOutput(res.amountOut, 300);
+            }
         } else if (outIsPT && inIsETH) {
-            outAmount = _routeEthToPt(outputToken, amountIn, recipient);
+            (PoolKey memory keyOut, bool migratedOut) = _playerPoolKey(outputToken);
+            _settleExactIn(Currency.wrap(ETH_ADDR), amountIn);
+            _swapExactIn(keyOut, /*zeroForOne*/ true, amountIn, bytes(""));
+            res.amountOut = _managerOwed(Currency.wrap(outputToken));
+            if (res.amountOut != 0) {
+                poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
+            }
+            // Fee on ETH input
+            if (migratedOut) {
+                uint256 bps = _migratorFeeBps(address(keyOut.hooks), amountIn);
+                res.totalFeesEth += _feeOnEthInput(amountIn, bps);
+            } else {
+                res.totalFeesEth += _feeOnEthInput(amountIn, 300);
+            }
         } else if (inIsPT && outIsUSDC) {
-            outAmount = _routePtToUsdc(inputToken, amountIn, recipient);
+            // First hop PT -> ETH (isUsdc=true; no skip)
+            (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
+            PoolKey memory keyMid = _ethUsdcKey();
+
+            _settleExactIn(Currency.wrap(inputToken), amountIn);
+            bytes memory hop1 = abi.encode(MultiHopContext({ isMultiHop: true, isUsdc: true }));
+            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, hop1);
+
+            uint256 ethInterim = _managerOwed(Currency.wrap(ETH_ADDR));
+            // Fee on ETH output of first hop (no skip)
+            if (migratedIn) {
+                uint256 bps1 = _migratorFeeBps(address(keyIn.hooks), ethInterim);
+                res.totalFeesEth += _feeOnEthOutput(ethInterim, bps1);
+            } else {
+                res.totalFeesEth += _feeOnEthOutput(ethInterim, 300);
+            }
+
+            if (ethInterim > 0) {
+                _swapExactIn(keyMid, /*zeroForOne*/ true, ethInterim, bytes(""));
+            }
+            res.amountOut = _managerOwed(Currency.wrap(USDC));
+            if (res.amountOut != 0) {
+                poolManager.take(Currency.wrap(USDC), recipient, res.amountOut);
+            }
+
+            // Uniswap v4 fee on ETH input for ETH->USDC hop
+            if (ethInterim > 0) {
+                res.totalFeesEth += _feeOnEthInput(ethInterim, _v4FeeBps(ethUsdcFee));
+            }
         } else if (outIsPT && inIsUSDC) {
-            outAmount = _routeUsdcToPt(outputToken, amountIn, recipient);
+            // First hop USDC -> ETH
+            PoolKey memory keyMid = _ethUsdcKey();
+            (PoolKey memory keyOut, bool migratedOut) = _playerPoolKey(outputToken);
+
+            _settleExactIn(Currency.wrap(USDC), amountIn);
+            _swapExactIn(keyMid, /*zeroForOne*/ false, amountIn, bytes(""));
+
+            uint256 ethInterim = _managerOwed(Currency.wrap(ETH_ADDR));
+            // Uniswap v4 fee on USDC input → convert to ETH using token's migrator price
+            {
+                uint256 usdcFee = _feeOnUsdcInput(amountIn, _v4FeeBps(ethUsdcFee));
+                uint256 ethPriceUsd = _ethPriceUsdFromToken(outputToken);
+                if (ethPriceUsd != 0) {
+                    uint256 usdcFeeAsEth = (usdcFee * 1e18) / ethPriceUsd;
+                    res.totalFeesEth += usdcFeeAsEth;
+                }
+            }
+
+            if (ethInterim > 0) {
+                _swapExactIn(keyOut, /*zeroForOne*/ true, ethInterim, bytes(""));
+            }
+            res.amountOut = _managerOwed(Currency.wrap(outputToken));
+            if (res.amountOut != 0) {
+                poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
+            }
+
+            // Fee on ETH input of ETH->PT hop
+            if (ethInterim > 0) {
+                if (migratedOut) {
+                    uint256 bps2 = _migratorFeeBps(address(keyOut.hooks), ethInterim);
+                    res.totalFeesEth += _feeOnEthInput(ethInterim, bps2);
+                } else {
+                    res.totalFeesEth += _feeOnEthInput(ethInterim, 300);
+                }
+            }
         } else {
             revert NotWhitelisted();
         }
 
-        if (minOut != 0 && outAmount < minOut) revert Slippage();
-    }
+        if (minOut != 0 && res.amountOut < minOut) revert Slippage();
 
-    // ============ Routing helpers ============
-
-    // PT -> PT (two hops via ETH); first hop marks multi-hop and not USDC for fee skip
-    function _routePtToPt(address ptIn, address ptOut, uint256 amountIn, address recipient) internal returns (uint256 outAmt) {
-        (PoolKey memory key1, ) = _playerPoolKey(ptIn);
-        (PoolKey memory key2, ) = _playerPoolKey(ptOut);
-
-        _settleExactIn(Currency.wrap(ptIn), amountIn);
-
-        bytes memory hop1 = abi.encode(MultiHopContext({ isMultiHop: true, isUsdc: false }));
-        _swapExactIn(key1, /*zeroForOne*/ false, amountIn, hop1);
-
-        uint256 ethInterim = _managerOwed(Currency.wrap(ETH_ADDR));
-        if (ethInterim > 0) {
-            _swapExactIn(key2, /*zeroForOne*/ true, ethInterim, bytes(""));
-        }
-
-        outAmt = _managerOwed(Currency.wrap(ptOut));
-        if (outAmt != 0) {
-            poolManager.take(Currency.wrap(ptOut), recipient, outAmt);
-        }
-    }
-
-    // PT -> ETH (single hop)
-    function _routePtToEth(address ptIn, uint256 amountIn, address recipient) internal returns (uint256 outAmt) {
-        (PoolKey memory key, ) = _playerPoolKey(ptIn);
-        _settleExactIn(Currency.wrap(ptIn), amountIn);
-        _swapExactIn(key, /*zeroForOne*/ false, amountIn, bytes(""));
-        outAmt = _managerOwed(Currency.wrap(ETH_ADDR));
-        if (outAmt != 0) {
-            poolManager.take(Currency.wrap(ETH_ADDR), recipient, outAmt);
-        }
-    }
-
-    // ETH -> PT (single hop)
-    function _routeEthToPt(address ptOut, uint256 amountIn, address recipient) internal returns (uint256 outAmt) {
-        (PoolKey memory key, ) = _playerPoolKey(ptOut);
-        _settleExactIn(Currency.wrap(ETH_ADDR), amountIn);
-        _swapExactIn(key, /*zeroForOne*/ true, amountIn, bytes(""));
-        outAmt = _managerOwed(Currency.wrap(ptOut));
-        if (outAmt != 0) {
-            poolManager.take(Currency.wrap(ptOut), recipient, outAmt);
-        }
-    }
-
-    // PT -> USDC (two hops via ETH); first hop marks isUsdc=true (no skip)
-    function _routePtToUsdc(address ptIn, uint256 amountIn, address recipient) internal returns (uint256 outAmt) {
-        (PoolKey memory key1, ) = _playerPoolKey(ptIn);
-        PoolKey memory key2 = _ethUsdcKey();
-
-        _settleExactIn(Currency.wrap(ptIn), amountIn);
-
-        bytes memory hop1 = abi.encode(MultiHopContext({ isMultiHop: true, isUsdc: true }));
-        _swapExactIn(key1, /*zeroForOne*/ false, amountIn, hop1);
-
-        uint256 ethInterim = _managerOwed(Currency.wrap(ETH_ADDR));
-        if (ethInterim > 0) {
-            _swapExactIn(key2, /*zeroForOne*/ true, ethInterim, bytes(""));
-        }
-
-        outAmt = _managerOwed(Currency.wrap(USDC));
-        if (outAmt != 0) {
-            poolManager.take(Currency.wrap(USDC), recipient, outAmt);
-        }
-    }
-
-    // USDC -> PT (two hops via ETH)
-    function _routeUsdcToPt(address ptOut, uint256 amountIn, address recipient) internal returns (uint256 outAmt) {
-        PoolKey memory key1 = _ethUsdcKey();
-        (PoolKey memory key2, ) = _playerPoolKey(ptOut);
-
-        _settleExactIn(Currency.wrap(USDC), amountIn);
-
-        _swapExactIn(key1, /*zeroForOne*/ false, amountIn, bytes(""));
-
-        uint256 ethInterim = _managerOwed(Currency.wrap(ETH_ADDR));
-        if (ethInterim > 0) {
-            _swapExactIn(key2, /*zeroForOne*/ true, ethInterim, bytes(""));
-        }
-
-        outAmt = _managerOwed(Currency.wrap(ptOut));
-        if (outAmt != 0) {
-            poolManager.take(Currency.wrap(ptOut), recipient, outAmt);
-        }
+        res.totalGas = gasStart - gasleft();
     }
 
     // ============ Internal V4 I/O ============
@@ -296,24 +304,14 @@ contract HPSwapRouter2 {
     // ============ PoolKey builders ============
 
     function _playerPoolKey(address pt) internal view returns (PoolKey memory key, bool hasMigrated) {
-        (
-            , /*tokenAddr*/,
-            , /*vault*/,
-            address dopplerHook,
-            address migratorHook,
-            bool migrated,
-            bool isActive,
-            , /*deactivatedAt*/
-            /*sunsetComplete*/
-        ) = registry.tokenSets(pt);
-        if (!isActive) revert NotWhitelisted();
-        hasMigrated = migrated;
+        if (!registry.isMarketActive(pt)) revert NotWhitelisted();
+
+        hasMigrated = registry.hasMigrated(pt);
+        (address dopplerHook, address migratorHook) = registry.getHooks(pt);
 
         if (!hasMigrated) {
-            // Use Doppler hook’s poolKey (authoritative fee/tickSpacing)
             key = IDopplerHook(dopplerHook).poolKey();
         } else {
-            // Use migrator hook with configured fee/tickSpacing
             key = PoolKey({
                 currency0: Currency.wrap(ETH_ADDR),
                 currency1: Currency.wrap(pt),
@@ -334,11 +332,46 @@ contract HPSwapRouter2 {
         });
     }
 
+    // ============== Fee Helpers ==============
+
+    // Uniswap v4 fee param is hundredths of a bip; convert to bps
+    function _v4FeeBps(uint24 feeParam) internal pure returns (uint256) {
+        return uint256(feeParam) / 100;
+    }
+
+    // Dynamic fee bps from migrator hook (ignores ethPriceUsd here)
+    function _migratorFeeBps(address migratorHook, uint256 volumeEth) internal view returns (uint256) {
+        if (migratorHook == address(0)) return 0;
+        (uint256 feeBps, ) = IMigratorHook(migratorHook).simulateDynamicFee(volumeEth);
+        return feeBps;
+    }
+
+    // Fee when charged on ETH input (exact)
+    function _feeOnEthInput(uint256 ethIn, uint256 feeBps) internal pure returns (uint256) {
+        return (ethIn * feeBps) / 10_000;
+    }
+
+    // Fee when charged on ETH output (net → gross adjustment)
+    function _feeOnEthOutput(uint256 ethOutNet, uint256 feeBps) internal pure returns (uint256) {
+        uint256 denom = 10_000 - feeBps;
+        return denom == 0 ? 0 : (ethOutNet * feeBps) / denom;
+    }
+
+    // Uniswap fee on USDC input (reported in USDC, 6 decimals for Base USDC)
+    function _feeOnUsdcInput(uint256 usdcIn, uint256 feeBps) internal pure returns (uint256) {
+        return (usdcIn * feeBps) / 10_000;
+    }
+
+    function _ethPriceUsdFromToken(address pt) internal view returns (uint256) {
+        (, address migratorHook) = registry.getHooks(pt);
+        if (migratorHook == address(0)) return 0;
+        return IMigratorHook(migratorHook).quoteEthPriceUsd(); // 6 decimals
+    }
+
     // ============ Views / helpers ============
 
     function _isPlayerToken(address token) internal view returns (bool) {
-        (, bool isActive) = registry.getVaultAndStatus(token);
-        return isActive;
+        return registry.isMarketActive(token);
     }
 
     function hasPermit2Allowance(address owner, address token, uint256 needed)

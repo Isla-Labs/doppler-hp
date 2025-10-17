@@ -13,15 +13,7 @@ import { Currency } from "@v4-core/types/Currency.sol";
 import { SD59x18, exp, sd } from "@prb/math/src/SD59x18.sol";
 import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
-
-/// @notice Context for multi-hop swap coordination
-/// @dev Disables double-fee collection during Player Token -> Player Token swaps
-/// @param isMultiHop
-/// @param isUsdc
-struct MultiHopContext {
-    bool isMultiHop;
-    bool isUsdc;
-}
+import { MultiHopContext } from "src/interfaces/IUtilities.sol";
 
 /**
  * @title Uniswap V4 Migrator Hook with Dynamic Fees
