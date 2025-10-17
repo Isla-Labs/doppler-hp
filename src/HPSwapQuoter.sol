@@ -91,14 +91,16 @@ contract HPSwapQuoter {
         positionManager = positionManager_;
         USDC = _usdc;
 
-        (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
-            IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
         if (ethUsdcPoolId_ != bytes32(0)) {
+            (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
+            IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
+
             address c0a = Currency.unwrap(c0);
             address c1a = Currency.unwrap(c1);
             if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
                 revert BadEthUsdcBinding(ethUsdcPoolId_, c0a, c1a, address(h));
             }
+            
             ethUsdcFee = fee;
             ethUsdcTickSpacing = spacing;
             ethUsdcPoolId = ethUsdcPoolId_;
@@ -123,7 +125,7 @@ contract HPSwapQuoter {
         if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
             revert BadEthUsdcBinding(newPoolId, c0a, c1a, address(h));
         }
-        
+
         ethUsdcFee = fee;
         ethUsdcTickSpacing = spacing;
         ethUsdcPoolId = newPoolId;
