@@ -35,9 +35,10 @@ contract HPSwapQuoter {
     //  Pool Detection Config
     // ------------------------------------------
 
-    // Tokens and params
+    // Pairs
+    address public immutable ETH;
+    address public immutable WETH;
     address public immutable USDC;
-    address public constant ETH_ADDR = address(0);
 
     // Migrated playerToken pool params
     uint24 public constant migratorFee = 1000;
@@ -45,6 +46,7 @@ contract HPSwapQuoter {
 
     // Updateable ETH/USDC pool params
     bytes32 public ethUsdcPoolId;
+    address public ethUsdcBase;
     uint24 public ethUsdcFee;
     int24 public ethUsdcTickSpacing;
 
@@ -53,6 +55,7 @@ contract HPSwapQuoter {
     // ------------------------------------------
 
     error NotWhitelisted();
+    error ZeroAddress();
     error BadEthUsdcBinding(bytes32 poolId, address currency0, address currency1, address hook);
     error Unauthorized();
     error EthUsdcPoolUnavailable();
@@ -75,36 +78,48 @@ contract HPSwapQuoter {
         IWhitelistRegistry _registry,
         IV4Quoter _quoter,
         address _marketOrchestrator,
-        address _usdc,
-        address positionManager_,
-        bytes32 ethUsdcPoolId_
+        address _positionManager,
+        bytes32 _ethUsdcPoolId
     ) {
-        require(address(_poolManager) != address(0) && address(_registry) != address(0), "bad core");
-        require(address(_quoter) != address(0), "bad quoter");
-        require(address(_marketOrchestrator) != address(0), "bad orchestrator");
-        require(_usdc != address(0) && positionManager_ != address(0), "bad addr");
+        if (
+            address(_poolManager) == address(0) || 
+            address(_registry) == address(0) || 
+            address(_quoter) == address(0) || 
+            _marketOrchestrator == address(0) || 
+            _positionManager == address(0)
+        ) revert ZeroAddress();
 
         poolManager = _poolManager;
         registry = _registry;
         quoter = _quoter;
         marketOrchestrator = _marketOrchestrator;
-        positionManager = positionManager_;
-        USDC = _usdc;
+        positionManager = _positionManager;
 
-        if (ethUsdcPoolId_ != bytes32(0)) {
+        ETH = address(0);
+        WETH = 0x4200000000000000000000000000000000000006;
+
+        if (block.chainid == 8453) {
+            USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913; // Base mainnet
+        } else if (block.chainid == 84532) {
+            USDC = 0x036CbD53842c5426634e7929541eC2318f3dCF7e; // Base Sepolia
+        } else {
+            revert Unauthorized();
+        }
+
+        if (_ethUsdcPoolId != bytes32(0)) {
             (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
-            IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
-
+                IPositionManager(positionManager).poolKeys(_ethUsdcPoolId);
             address c0a = Currency.unwrap(c0);
             address c1a = Currency.unwrap(c1);
-            if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
-                revert BadEthUsdcBinding(ethUsdcPoolId_, c0a, c1a, address(h));
+            if (!(c1a == USDC && address(h) == address(0) && (c0a == ETH || c0a == WETH))) {
+                revert BadEthUsdcBinding(_ethUsdcPoolId, c0a, c1a, address(h));
             }
-            
+            ethUsdcBase = c0a;
             ethUsdcFee = fee;
             ethUsdcTickSpacing = spacing;
-            ethUsdcPoolId = ethUsdcPoolId_;
+            ethUsdcPoolId = _ethUsdcPoolId;
         } else {
+            ethUsdcBase = address(0);
             ethUsdcFee = 0;
             ethUsdcTickSpacing = 0;
             ethUsdcPoolId = bytes32(0);
@@ -122,10 +137,11 @@ contract HPSwapQuoter {
 
         address c0a = Currency.unwrap(c0);
         address c1a = Currency.unwrap(c1);
-        if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
+        if (!(c1a == USDC && address(h) == address(0) && (c0a == ETH || c0a == WETH))) {
             revert BadEthUsdcBinding(newPoolId, c0a, c1a, address(h));
         }
 
+        ethUsdcBase = c0a;
         ethUsdcFee = fee;
         ethUsdcTickSpacing = spacing;
         ethUsdcPoolId = newPoolId;
@@ -144,8 +160,8 @@ contract HPSwapQuoter {
 
         bool inIsPT = _isPlayerToken(inputToken);
         bool outIsPT = _isPlayerToken(outputToken);
-        bool inIsETH = (inputToken == ETH_ADDR);
-        bool outIsETH = (outputToken == ETH_ADDR);
+        bool inIsETH = (inputToken == ETH);
+        bool outIsETH = (outputToken == ETH);
         bool inIsUSDC = (inputToken == USDC);
         bool outIsUSDC = (outputToken == USDC);
 
@@ -324,7 +340,7 @@ contract HPSwapQuoter {
             key = IDopplerHook(dopplerHook).poolKey();
         } else {
             key = PoolKey({
-                currency0: Currency.wrap(ETH_ADDR),
+                currency0: Currency.wrap(ETH),
                 currency1: Currency.wrap(pt),
                 hooks: IHooks(migratorHook),
                 fee: migratorFee,
@@ -335,7 +351,7 @@ contract HPSwapQuoter {
 
     function _ethUsdcKey() internal view returns (PoolKey memory key) {
         key = PoolKey({
-            currency0: Currency.wrap(ETH_ADDR),
+            currency0: Currency.wrap(ethUsdcBase),
             currency1: Currency.wrap(USDC),
             hooks: IHooks(address(0)),
             fee: ethUsdcFee,
