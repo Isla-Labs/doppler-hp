@@ -120,7 +120,7 @@ contract HPSwapRouter is ReentrancyGuard {
         } else if (block.chainid == 84532) {
             USDC = 0x036CbD53842c5426634e7929541eC2318f3dCF7e; // Base Sepolia
         } else {
-            revert Unauthorized();
+            revert EthUsdcPoolUnavailable();
         }
 
         if (_ethUsdcPoolId != bytes32(0)) {
