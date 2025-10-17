@@ -26,10 +26,12 @@ error Expired;
 /**
  * @title HP Swap Router
  * @dev Simple swap API with UR-style hardening and internal pipeline:
- *      - Pool detection + hop sequencing
+ *      - Pool detection + hop sequencing (avoids double fee for playerToken <> playerToken swaps)
  *      - ETH overpay accepted, settle exact, auto-refund (WETH fallback)
  *      - ERC20 input ephemeral refund
  *      - OZ ReentrancyGuard
+ * @author Isla Labs
+ * @custom:security-contact security@islalabs.co
  */
 contract HPSwapRouter is ReentrancyGuard {
     IPoolManager public immutable poolManager;
