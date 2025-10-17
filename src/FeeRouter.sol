@@ -5,6 +5,8 @@ import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
+import { IHPSwapRouter } from "src/interfaces/IHPSwapRouter.sol";
+import { IERC20 } from "src/interfaces/IUtilities.sol";
 
 contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
     uint256 public constant BPS = 10_000;
@@ -13,6 +15,8 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
 
     address public rewardsTreasury;
     IWhitelistRegistry public registry;
+    address public airlock;
+    address public swapRouter;
 
     address[] public recipients;
     uint16[] public recipientsBps; // sums to 10_000
@@ -22,11 +26,13 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
     event Distributed(uint256 amount, uint256 nRecipients);
     event Rescue(address indexed to, uint256 amount);
 
-    // new
-    event TaggedDeposit(address indexed token, address indexed market, address indexed source, uint256 amount, bytes32 tag);
-
     modifier onlyAuthorized(address market) {
         require(registry.isAuthorizedHookFor(market, msg.sender), "NOT_AUTH");
+        _;
+    }
+
+    modifier onlyAirlock() { // new
+        require(msg.sender == airlock, "NOT_AIRLOCK");
         _;
     }
 
@@ -35,16 +41,23 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
     function initialize(
         address owner_,
         address rewardsTreasury_,
-        address registry_
+        address registry_,
+        address airlock_,
+        address swapRouter_
     ) external initializer {
         require(owner_ != address(0), "ZERO_OWNER");
         require(rewardsTreasury_ != address(0), "ZERO_REWARDS");
         require(registry_ != address(0), "ZERO_REGISTRY");
+        require(airlock_ != address(0), "ZERO_AIRLOCK");
+        require(swapRouter_ != address(0), "ZERO_SWAP_ROUTER");
+
         __Ownable2Step_init();
         __ReentrancyGuard_init();
         _transferOwnership(owner_);
         rewardsTreasury = rewardsTreasury_;
         registry = IWhitelistRegistry(registry_);
+        airlock = airlock_;
+        swapRouter = swapRouter_;
     }
 
     receive() external payable {
@@ -54,12 +67,50 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
     // Payable path used by Doppler to forward bonding ETH and auto-route 89% to rewards
     function forwardBondingFee(address market) external payable onlyAuthorized(market) nonReentrant {
         uint256 amount = msg.value;
-        emit TaggedDeposit(address(0), market, msg.sender, amount, bytes32("DOPPLER_FEE"));
 
         uint256 forward = (amount * PBR_BPS) / BPS;
         if (forward > 0) {
             (bool ok, ) = payable(rewardsTreasury).call{ value: forward }("");
             require(ok, "FWD_FAIL");
+        }
+    }
+
+    /// @notice Convert ERC20 balance (accrued during bonding) to ETH via HPSwapRouter
+    /// @dev Retroactively relays 89% of currency1 fees for Performance Based Returns
+    function convertBondingFee(
+        address token,        // ERC20 held by FeeRouter
+        uint256 deadline
+    ) external onlyAirlock nonReentrant {
+        require(token != address(0), "ZERO_TOKEN");
+        require(swapRouter != address(0), "ZERO_ROUTER");
+
+        uint256 amountIn = IERC20(token).balanceOf(address(this));
+        require(amountIn > 0, "NO_BALANCE");
+
+        // Approve router if needed
+        if (IERC20(token).allowance(address(this), swapRouter) < amountIn) {
+            require(IERC20(token).approve(swapRouter, amountIn), "APPROVE_FAIL");
+        }
+
+        // swap(token -> ETH) to this contract; minOut=0 per your simplification
+        IHPSwapRouter.SwapResult memory sr = IHPSwapRouter(swapRouter).swap(
+            token,
+            address(0),
+            amountIn,
+            0,
+            address(this),
+            deadline
+        );
+
+        uint256 ethOut = sr.amountOut;
+
+        if (ethOut > 0) {
+            // forward 89% to rewards
+            uint256 forward = (ethOut * PBR_BPS) / BPS;
+            if (forward > 0) {
+                (bool sent, ) = payable(rewardsTreasury).call{ value: forward }("");
+                require(sent, "FWD_FAIL");
+            }
         }
     }
 

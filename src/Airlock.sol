@@ -242,6 +242,8 @@ contract Airlock is Ownable {
 
         _updateMigrationStatus(asset);
 
+        IFeeRouter(feeRouter).convertBondingFee(asset, block.timestamp + 600);
+
         emit Migrate(asset, assetData.migrationPool);
     }
 
