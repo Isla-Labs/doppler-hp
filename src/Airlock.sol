@@ -8,6 +8,7 @@ import { ITokenFactory } from "src/interfaces/ITokenFactory.sol";
 import { IGovernanceFactory } from "src/interfaces/IGovernanceFactory.sol";
 import { IPoolInitializer } from "src/interfaces/IPoolInitializer.sol";
 import { ILiquidityMigrator } from "src/interfaces/ILiquidityMigrator.sol";
+import { IWhitelistRegistryAdmin } from "src/interfaces/IWhitelistRegistry.sol";
 import { DERC20 } from "src/DERC20.sol";
 
 enum ModuleState {
@@ -121,9 +122,11 @@ contract Airlock is Ownable {
     mapping(address token => uint256 amount) public getProtocolFees;
     mapping(address integrator => mapping(address token => uint256 amount)) public getIntegratorFees;
 
-    address public defaultFeeRecipient0;
-    address public defaultFeeRecipient1;
-    event SetDefaultFeeRecipients(address r0, address r1);
+    address public immutable whitelistRegistry;
+    address public immutable defaultFeeRecipient0;
+    address public immutable defaultFeeRecipient1;
+    
+    error ZeroAddress();
 
     receive() external payable { }
 
@@ -131,8 +134,20 @@ contract Airlock is Ownable {
      * @param owner_ Address receiving the ownership of the Airlock contract
      */
     constructor(
+        address feeRouter_,
+        address whitelistRegistry_,
         address owner_
-    ) Ownable(owner_) { }
+    ) Ownable(owner_) {
+        if (
+            feeRouter_ == address(0) || 
+            whitelistRegistry_ == address(0) || 
+            owner_ == address(0)
+        ) revert ZeroAddress();
+
+        defaultFeeRecipient0 = feeRouter_;
+        defaultFeeRecipient1 = feeRouter_;
+        whitelistRegistry = whitelistRegistry_;
+    }
 
     /**
      * @notice Deploys a new token with the associated governance, timelock and hook contracts
@@ -235,13 +250,17 @@ contract Airlock is Ownable {
 
         assetData.liquidityMigrator.migrate(sqrtPriceX96, token0, token1, assetData.timelock);
 
+        _updateMigrationStatus(asset);
+
         emit Migrate(asset, assetData.migrationPool);
     }
 
-    function setDefaultFeeRecipients(address r0, address r1) external onlyOwner {
-        defaultFeeRecipient0 = r0;
-        defaultFeeRecipient1 = r1;
-        emit SetDefaultFeeRecipients(r0, r1);
+    /**
+     * @dev Updates migration status of the market in WhitelistRegistry
+     * @param Address of the newly migrated token
+     */
+    function _updateMigrationStatus(address token) internal {
+        IWhitelistRegistryAdmin(whitelistRegistry).updateMigrationStatus(token);
     }
 
     /**
