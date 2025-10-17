@@ -21,7 +21,7 @@ import { ProtocolFeeLibrary } from "@v4-core/libraries/ProtocolFeeLibrary.sol";
 import { SwapMath } from "@v4-core/libraries/SwapMath.sol";
 import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
-import { ITaggableFeeRouter } from "src/interfaces/ITaggableFeeRouter.sol";
+import { IFeeRouter } from "src/interfaces/IFeeRouter.sol";
 
 bytes4 constant ERC20_TRANSFER_SELECTOR = 0xa9059cbb; // transfer(address,uint256)
 
@@ -1307,7 +1307,7 @@ contract Doppler is BaseHook {
 
         if (token == address(0)) {
             (ok, ) = to.call{ value: amt }(
-                abi.encodeWithSelector(ITaggableFeeRouter.forwardBondingFee.selector, market)
+                abi.encodeWithSelector(IFeeRouter.forwardBondingFee.selector, market)
             );
         } else {
             assembly {
