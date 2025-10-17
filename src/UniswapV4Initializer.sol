@@ -34,7 +34,7 @@ contract DopplerDeployer {
             int24 gamma,
             bool isToken0,
             uint256 numPDSlugs,
-            uint24 lpFee,
+            uint24 lpFee
         ) = abi.decode(
             data, (uint256, uint256, uint256, uint256, int24, int24, uint256, int24, bool, uint256, uint24, int24)
         );
@@ -91,17 +91,18 @@ contract UniswapV4Initializer is IPoolInitializer, ImmutableAirlock {
         address numeraire,
         uint256 numTokensToSell,
         bytes32 salt,
-        bytes calldata data
+        bytes calldata data,
+        address feeRouter_
     ) external onlyAirlock returns (address) {
-        (,,,, int24 startingTick,,,, bool isToken0,,, int24 tickSpacing) = abi.decode(
-            data, (uint256, uint256, uint256, uint256, int24, int24, uint256, int24, bool, uint256, uint24, int24)
-        );
+        (,,,, int24 startingTick,,,, bool isToken0,,, int24 tickSpacing) =
+            abi.decode(data, (uint256, uint256, uint256, uint256, int24, int24, uint256, int24, bool, uint256, uint24, int24));
 
         Doppler doppler = deployer.deploy(numTokensToSell, salt, data);
 
-        if (isToken0 && asset > numeraire || !isToken0 && asset < numeraire) {
-            revert InvalidTokenOrder();
-        }
+        // set fee router on the hook (initializer is msg.sender here)
+        doppler.setFeeRouter(feeRouter_);
+
+        if (isToken0 && asset > numeraire || !isToken0 && asset < numeraire) revert InvalidTokenOrder();
 
         PoolKey memory poolKey = PoolKey({
             currency0: isToken0 ? Currency.wrap(asset) : Currency.wrap(numeraire),
@@ -138,10 +139,5 @@ contract UniswapV4Initializer is IPoolInitializer, ImmutableAirlock {
     {
         (sqrtPriceX96, token0, fees0, balance0, token1, fees1, balance1) =
             Doppler(payable(hook)).migrate(address(airlock));
-    }
-
-    /// @notice Airlock-only helper to set fee recipients on the hook (initializer-gated in hook)
-    function setHookFeeRecipients(address hook, address r0, address r1) external onlyAirlock {
-        Doppler(payable(hook)).setFeeRecipients(r0, r1);
     }
 }

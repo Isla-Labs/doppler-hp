@@ -123,8 +123,7 @@ contract Airlock is Ownable {
     mapping(address integrator => mapping(address token => uint256 amount)) public getIntegratorFees;
 
     address public immutable whitelistRegistry;
-    address public immutable defaultFeeRecipient0;
-    address public immutable defaultFeeRecipient1;
+    address public immutable feeRouter;
     
     error ZeroAddress();
 
@@ -144,8 +143,7 @@ contract Airlock is Ownable {
             owner_ == address(0)
         ) revert ZeroAddress();
 
-        defaultFeeRecipient0 = feeRouter_;
-        defaultFeeRecipient1 = feeRouter_;
+        feeRouter = feeRouter_;
         whitelistRegistry = whitelistRegistry_;
     }
 
@@ -174,15 +172,7 @@ contract Airlock is Ownable {
 
         ERC20(asset).approve(address(createData.poolInitializer), createData.numTokensToSell);
         pool = createData.poolInitializer.initialize(
-            asset, createData.numeraire, createData.numTokensToSell, createData.salt, createData.poolInitializerData
-        );
-
-        // Set Doppler fee recipients via initializer (best-effort)
-        address r0 = defaultFeeRecipient0;
-        address r1 = defaultFeeRecipient1;
-        require(r0 != address(0) && r1 != address(0), "RECIPIENTS_NOT_SET");
-        (bool ok, ) = address(createData.poolInitializer).call(
-            abi.encodeWithSignature("setHookFeeRecipients(address,address,address)", pool, r0, r1)
+            asset, createData.numeraire, createData.numTokensToSell, createData.salt, createData.poolInitializerData, feeRouter
         );
 
         migrationPool =
