@@ -52,6 +52,7 @@ contract HPSwapRouter is ReentrancyGuard {
     bytes32 public ethUsdcPoolId;
     uint24 public ethUsdcFee;
     int24 public ethUsdcTickSpacing;
+    address public ethUsdcBase;
 
     // ------------------------------------------
     //  Events/Errors
@@ -100,7 +101,7 @@ contract HPSwapRouter is ReentrancyGuard {
         address _usdc,
         address _weth,
         address _positionManager,
-        bytes32 ethUsdcPoolId_
+        bytes32 _ethUsdcPoolId
     ) {
         if (
             address(_poolManager) == address(0) || 
@@ -119,20 +120,22 @@ contract HPSwapRouter is ReentrancyGuard {
         WETH = _weth;
         positionManager = _positionManager;
 
-        if (ethUsdcPoolId_ != bytes32(0)) {
+        if (_ethUsdcPoolId != bytes32(0)) {
             (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
-                IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
+                IPositionManager(positionManager).poolKeys(_ethUsdcPoolId);
 
             address c0a = Currency.unwrap(c0);
             address c1a = Currency.unwrap(c1);
             if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
-                revert BadEthUsdcBinding(ethUsdcPoolId_, c0a, c1a, address(h));
+                revert BadEthUsdcBinding(_ethUsdcPoolId, c0a, c1a, address(h));
             }
 
+            ethUsdcBase = c0a;
             ethUsdcFee = fee;
             ethUsdcTickSpacing = spacing;
-            ethUsdcPoolId = ethUsdcPoolId_;
+            ethUsdcPoolId = _ethUsdcPoolId;
         } else {
+            ethUsdcBase = address(0);
             ethUsdcFee = 0;
             ethUsdcTickSpacing = 0;
             ethUsdcPoolId = bytes32(0);
@@ -159,6 +162,7 @@ contract HPSwapRouter is ReentrancyGuard {
         uint24 oldFee = ethUsdcFee;
         int24 oldSpacing = ethUsdcTickSpacing;
 
+        ethUsdcBase = c0a;
         ethUsdcFee = fee;
         ethUsdcTickSpacing = spacing;
         ethUsdcPoolId = newPoolId;
@@ -268,6 +272,14 @@ contract HPSwapRouter is ReentrancyGuard {
                 } else {
                     poolManager.take(Currency.wrap(ETH_ADDR), recipient, res.amountOut);
                 }
+
+                // fee: ETH output of the PT(in) pool
+                if (migratedIn) {
+                    uint256 bps = _migratorFeeBps(address(keyIn.hooks), res.amountOut);
+                    res.totalFeesEth += _feeOnEthOutput(res.amountOut, bps);
+                } else {
+                    res.totalFeesEth += _feeOnEthOutput(res.amountOut, 300);
+                }
             }
 
         } else if (outIsPT && inIsETHish) {
@@ -282,6 +294,14 @@ contract HPSwapRouter is ReentrancyGuard {
 
             res.amountOut = _managerOwed(Currency.wrap(outputToken));
             if (res.amountOut != 0) poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
+
+            // fee: ETH input of the PT(out) pool
+            if (migratedOut) {
+                uint256 bps = _migratorFeeBps(address(keyOut.hooks), amountIn);
+                res.totalFeesEth += _feeOnEthInput(amountIn, bps);
+            } else {
+                res.totalFeesEth += _feeOnEthInput(amountIn, 300);
+            }
 
         } else if (inIsPT && outIsUSDC) {
             // PT -> ETH (mark isUsdc=true to disable fee skip on first hop)
@@ -302,7 +322,18 @@ contract HPSwapRouter is ReentrancyGuard {
                 res.totalFeesEth += _feeOnEthOutput(ethInterim, 300);
             }
 
-            if (ethInterim > 0) _swapExactIn(keyMid, /*zeroForOne*/ true, ethInterim, bytes(""));
+            if (ethInterim > 0) {
+                if (ethUsdcBase == WETH) {
+                    // Convert ETH credit -> WETH credit for the mid-hop
+                    poolManager.take(Currency.wrap(ETH_ADDR), address(this), ethInterim);
+                    IWETH(WETH).deposit{ value: ethInterim }();
+                    poolManager.sync(Currency.wrap(WETH));
+                    if (!IERC20(WETH).transfer(address(poolManager), ethInterim)) revert Erc20TransferFailed(WETH, address(poolManager), ethInterim);
+                    poolManager.settle();
+                }
+                _swapExactIn(keyMid, /*zeroForOne*/ true, ethInterim, bytes(""));
+            }
+
             res.amountOut = _managerOwed(Currency.wrap(USDC));
             if (res.amountOut != 0) poolManager.take(Currency.wrap(USDC), recipient, res.amountOut);
 
@@ -320,7 +351,20 @@ contract HPSwapRouter is ReentrancyGuard {
             _settleExactIn(Currency.wrap(USDC), amountIn);
             _swapExactIn(keyMid, /*zeroForOne*/ false, amountIn, bytes(""));
 
-            uint256 ethInterim = _managerOwed(Currency.wrap(ETH_ADDR));
+            uint256 ethInterim;
+            if (ethUsdcBase == WETH) {
+                uint256 wethInterim = _managerOwed(Currency.wrap(WETH));
+                if (wethInterim > 0) {
+                    // Convert WETH credit -> ETH credit for the final hop
+                    poolManager.take(Currency.wrap(WETH), address(this), wethInterim);
+                    IWETH(WETH).withdraw(wethInterim);
+                    poolManager.settle{ value: wethInterim }();
+                }
+                ethInterim = wethInterim;
+            } else {
+                ethInterim = _managerOwed(Currency.wrap(ETH_ADDR));
+            }
+
             {
                 uint256 usdcFee = _feeOnUsdcInput(amountIn, _v4FeeBps(ethUsdcFee));
                 uint256 ethPriceUsd = _ethPriceUsdFromToken(outputToken);
@@ -454,7 +498,7 @@ contract HPSwapRouter is ReentrancyGuard {
 
     function _ethUsdcKey() internal view returns (PoolKey memory key) {
         key = PoolKey({
-            currency0: Currency.wrap(ETH_ADDR),
+            currency0: Currency.wrap(ethUsdcBase),
             currency1: Currency.wrap(USDC),
             hooks: IHooks(address(0)),
             fee: ethUsdcFee,
