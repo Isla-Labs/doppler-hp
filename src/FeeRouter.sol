@@ -98,7 +98,6 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
             address(0),
             amountIn,
             0,
-            address(this),
             deadline
         );
 
