@@ -7,7 +7,7 @@ import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
-import { IERC20, IPermit2, MultiHopContext } from "src/interfaces/IUtilities.sol";
+import { IERC20, IPermit2, MultiHopContext, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
 struct SwapResult {
@@ -22,8 +22,15 @@ error InvalidAmount();
 error Slippage();
 error Expired;
 
+/**
+ * @title HP Swap Router
+ * @dev Automatic pool detection and fee reduction for multihops
+ * @author Isla Labs
+ * @custom:security-contact security@islalabs.co
+ */
 contract HPSwapRouter {
     IPoolManager public immutable poolManager;
+    address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
     address public immutable marketOrchestrator;
 
@@ -33,14 +40,15 @@ contract HPSwapRouter {
     // Canonical Permit2
     address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
-    // Network tokens
+    // Mainnet/testnet USDC
     address public immutable USDC;
 
-    // Migrated PT pool params
+    // Migrated playerToken pool params
     uint24 public constant migratorFee = 1000;
     int24 public constant migratorTickSpacing = 10;
 
-    // ETH/USDC pool params (updateable)
+    // Updateable ETH/USDC pool params
+    bytes32 public ethUsdcPoolId;
     uint24 public ethUsdcFee;
     int24 public ethUsdcTickSpacing;
 
@@ -68,28 +76,44 @@ contract HPSwapRouter {
         IWhitelistRegistry _registry,
         address _marketOrchestrator,
         address _usdc,
-        uint24 _ethUsdcFee,
-        int24 _ethUsdcTickSpacing
+        address positionManager_,
+        bytes32 ethUsdcPoolId_
     ) {
         if (address(_poolManager) == address(0)) revert();
         if (address(_registry) == address(0)) revert();
         if (_marketOrchestrator == address(0)) revert();
         if (_usdc == address(0)) revert();
+        if (positionManager_ == address(0)) revert();
 
         poolManager = _poolManager;
         registry = _registry;
         marketOrchestrator = _marketOrchestrator;
 
         USDC = _usdc;
-        ethUsdcFee = _ethUsdcFee;
-        ethUsdcTickSpacing = _ethUsdcTickSpacing;
+        positionManager = positionManager_;
+
+        (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
+            IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
+
+        require(Currency.unwrap(c0) == ETH_ADDR && Currency.unwrap(c1) == USDC && address(h) == address(0), "BAD_ETH_USDC");
+        
+        ethUsdcFee = fee;
+        ethUsdcTickSpacing = spacing;
+        ethUsdcPoolId = ethUsdcPoolId_;
     }
 
     // ============ Admin ============
 
-    function setEthUsdcParams(uint24 fee, int24 tickSpacing) external onlyMarketOrchestrator {
+    function rebindEthUsdc(bytes32 newPoolId) external onlyMarketOrchestrator {
+        // Retrieve poolKey from poolId
+        (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
+            IPositionManager(positionManager).poolKeys(newPoolId);
+
+        require(Currency.unwrap(c0) == ETH_ADDR && Currency.unwrap(c1) == USDC && address(h) == address(0), "BAD_ETH_USDC");
+
         ethUsdcFee = fee;
-        ethUsdcTickSpacing = tickSpacing;
+        ethUsdcTickSpacing = spacing;
+        ethUsdcPoolId = newPoolId;
     }
 
     // ============ Single entry swap ============

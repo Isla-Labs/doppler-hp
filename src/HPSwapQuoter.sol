@@ -7,7 +7,7 @@ import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
-import { IV4Quoter, MultiHopContext } from "src/interfaces/IUtilities.sol";
+import { IV4Quoter, MultiHopContext, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
 struct QuoteResult {
@@ -18,9 +18,16 @@ struct QuoteResult {
 
 error NotWhitelisted();
 
+/**
+ * @title HP Swap Quoter
+ * @dev Automatic pool detection and fee reduction for multihops
+ * @author Isla Labs
+ * @custom:security-contact security@islalabs.co
+ */
 contract HPSwapQuoter {
     // Core dependencies
     IPoolManager public immutable poolManager;
+    address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
     IV4Quoter public immutable quoter;
     address public immutable marketOrchestrator;
@@ -29,11 +36,12 @@ contract HPSwapQuoter {
     address public immutable USDC;
     address public constant ETH_ADDR = address(0);
 
-    // Migrated PT pool params (constants)
+    // Migrated playerToken pool params
     uint24 public constant migratorFee = 1000;
     int24 public constant migratorTickSpacing = 10;
 
-    // Updateable ETH/USDC params
+    // Updateable ETH/USDC pool params
+    bytes32 public ethUsdcPoolId;
     uint24 public ethUsdcFee;
     int24 public ethUsdcTickSpacing;
 
@@ -48,28 +56,42 @@ contract HPSwapQuoter {
         IV4Quoter _quoter,
         address _marketOrchestrator,
         address _usdc,
-        uint24 _ethUsdcFee,
-        int24 _ethUsdcTickSpacing
+        address positionManager_,
+        bytes32 ethUsdcPoolId_
     ) {
         require(address(_poolManager) != address(0) && address(_registry) != address(0), "bad core");
         require(address(_quoter) != address(0), "bad quoter");
         require(address(_marketOrchestrator) != address(0), "bad orchestrator");
-        require(_usdc != address(0), "bad usdc");
+        require(_usdc != address(0) && positionManager_ != address(0), "bad addr");
 
         poolManager = _poolManager;
         registry = _registry;
         quoter = _quoter;
         marketOrchestrator = _marketOrchestrator;
-
+        positionManager = positionManager_;
         USDC = _usdc;
-        ethUsdcFee = _ethUsdcFee;
-        ethUsdcTickSpacing = _ethUsdcTickSpacing;
+
+        (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
+            IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
+
+        require(Currency.unwrap(c0) == ETH_ADDR && Currency.unwrap(c1) == USDC && address(h) == address(0), "BAD_ETH_USDC");
+        
+        ethUsdcFee = fee;
+        ethUsdcTickSpacing = spacing;
+
+        ethUsdcPoolId = ethUsdcPoolId_;
     }
 
-    // Admin setter for ETH/USDC params (same policy as router)
-    function setEthUsdcParams(uint24 fee, int24 tickSpacing) external onlyMarketOrchestrator {
+    function rebindEthUsdc(bytes32 newPoolId) external onlyMarketOrchestrator {
+        // Retrieve poolKey from poolId
+        (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
+            IPositionManager(positionManager).poolKeys(newPoolId);
+
+        require(Currency.unwrap(c0) == ETH_ADDR && Currency.unwrap(c1) == USDC && address(h) == address(0), "BAD_ETH_USDC");
+        
         ethUsdcFee = fee;
-        ethUsdcTickSpacing = tickSpacing;
+        ethUsdcTickSpacing = spacing;
+        ethUsdcPoolId = newPoolId;
     }
 
     // Main quote: detects intent and returns amountOut + summed gasEstimate + fee estimates.
@@ -191,9 +213,11 @@ contract HPSwapQuoter {
             // Uniswap v4 fee on USDC input → convert to ETH and accumulate
             {
                 uint256 usdcFee = _feeOnUsdcInput(amountIn, _v4FeeBps(ethUsdcFee));
-                uint256 ethPriceUsd = _ethPriceUsdFromToken(outputToken); // 6d price from token’s migrator hook
-                uint256 usdcFeeAsEth = (usdcFee * 1e18) / ethPriceUsd;    // USDC(6d) -> ETH(wei)
-                qr.totalFeesEth += usdcFeeAsEth;
+                uint256 ethPriceUsd = _ethPriceUsdFromToken(outputToken); // 6 decimals
+                if (ethPriceUsd != 0) {
+                    uint256 usdcFeeAsEth = (usdcFee * 1e18) / ethPriceUsd; // USDC(6d) -> ETH(wei)
+                    qr.totalFeesEth += usdcFeeAsEth;
+                }
             }
 
             // Second hop: ETH -> PT(out) (single hop) [ETH input]
@@ -307,7 +331,7 @@ contract HPSwapQuoter {
 
     function _ethPriceUsdFromToken(address pt) internal view returns (uint256) {
         (, address migratorHook) = registry.getHooks(pt);
-        require(migratorHook != address(0), "no migrator");
+        if (migratorHook == address(0)) return 0;
         return IMigratorHook(migratorHook).quoteEthPriceUsd(); // 6 decimals
     }
 }
