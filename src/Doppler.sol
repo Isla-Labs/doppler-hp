@@ -254,12 +254,8 @@ contract Doppler is BaseHook {
     /// @dev Range of the upper slug
     int24 internal upperSlugRange;
 
-    /// @notice Recipients for fee forwarding during bonding (token0/token1)
-    /// @dev Auto-routes to FeeRouter by default, which splits 89:11 for Performance Based Returns
-    /// @dev Effectively replaces bonding-stage pool fees
-    address public feeRecipient0;
-    address public feeRecipient1;
-    bool public feeRecipientsSet;
+    /// @dev Auto-routes bonding fees to rewardsTreasury, split 89:11 for Performance Based Returns
+    address public feeRouter;
 
     /// @notice Only the pool manager can send ETH to this contract
     receive() external payable {
@@ -851,9 +847,9 @@ contract Doppler is BaseHook {
             int128 cleared1;
 
             // token0
-            if (_payout(Currency.unwrap(key.currency0), feeRecipient0, f0)) cleared0 = a0;
+            if (_payout(Currency.unwrap(key.currency0), feeRouter, f0)) cleared0 = a0;
             // token1
-            if (_payout(Currency.unwrap(key.currency1), feeRecipient1, f1)) cleared1 = a1;
+            if (_payout(Currency.unwrap(key.currency1), feeRouter, f1)) cleared1 = a1;
 
             // Clear only what was actually transferred so accounting stays correct
             if (cleared0 != 0 || cleared1 != 0) {
@@ -1296,6 +1292,44 @@ contract Doppler is BaseHook {
         }
     }
 
+    /**
+     * @notice Relays bonding fees to FeeRouter for management (replaces dynamic fee for bytecode optimization)
+     * @dev ETH is immediately split 89:11 in FeeRouter and relayed to rewardsTreasury for Performance Based Returns
+     * @param token playerToken asset from the pool, always currency1
+     * @param to Address of the FeeRouter contract
+     * @param amt Fee amount taken from the trade (currency0 or currency1)
+     * @return ok Confirmation of successful fee transfer
+     */
+    function _payout(address token, address to, uint256 amt) internal returns (bool ok) {
+        if (amt == 0 || to == address(0)) return false;
+
+        address market = Currency.unwrap(poolKey.currency1); // playerToken is currency1
+
+        if (token == address(0)) {
+            (ok, ) = to.call{ value: amt }(
+                abi.encodeWithSelector(ITaggableFeeRouter.forwardBondingFee.selector, market)
+            );
+        } else {
+            assembly {
+                mstore(0x00, ERC20_TRANSFER_SELECTOR)
+                mstore(0x04, shl(96, to))
+                mstore(0x24, amt)
+                ok := call(gas(), token, 0, 0x00, 0x44, 0, 0x20)
+                if ok {
+                    switch returndatasize()
+                    case 0 { }
+                    case 32 {
+                        returndatacopy(0x00, 0, 32)
+                        ok := iszero(iszero(mload(0x00)))
+                    }
+                    default { ok := 0 }
+                }
+            }
+        }
+
+        return ok;
+    }
+
     /// @dev Data passed through the `unlock` call to the PoolManager to the `_unlockCallback`
     /// back in this contract. Using a struct here is usually to avoid using the wrong types.
     /// @param key Pool key associated with this hook
@@ -1463,71 +1497,6 @@ contract Doppler is BaseHook {
         });
     }
 
-    /// @notice Sets fee recipients once; callable only by the initializer (Airlock)
-    function setFeeRecipients(address r0, address r1) external {
-        if (msg.sender != initializer) revert SenderNotInitializer();
-        if (feeRecipientsSet) revert FeeRecipientsAlreadySet();
-        feeRecipient0 = r0;
-        feeRecipient1 = r1;
-        feeRecipientsSet = true;
-    }
-
-    function _payout(address token, address to, uint256 amt) internal returns (bool ok) {
-        if (amt == 0 || to == address(0)) return false;
-
-        // Transfer
-        if (token == address(0)) {
-            (ok,) = payable(to).call{ value: amt }("");
-        } else {
-            assembly {
-                mstore(0x00, ERC20_TRANSFER_SELECTOR)
-                mstore(0x04, shl(96, to))
-                mstore(0x24, amt)
-                ok := call(gas(), token, 0, 0x00, 0x44, 0, 0x20)
-                if ok {
-                    switch returndatasize()
-                    case 0 { }
-                    case 32 {
-                        returndatacopy(0x00, 0, 32)
-                        ok := iszero(iszero(mload(0x00)))
-                    }
-                    default { ok := 0 }
-                }
-            }
-        }
-
-        // Tag the deposit
-        if (ok && (to == feeRecipient0 || to == feeRecipient1)) {
-            address market = Currency.unwrap(poolKey.currency1);
-            bytes32 tag = bytes32("DOPPLER_FEE");
-
-            if (token == address(0)) {
-                // ETH payout tag (ignore success)
-                (/*s*/, ) = to.call(
-                    abi.encodeWithSelector(
-                        ITaggableFeeRouter.tagETHDeposit.selector,
-                        market,
-                        amt,
-                        tag
-                    )
-                );
-            } else {
-                // ERC20 payout tag (ignore success)
-                (/*s*/, ) = to.call(
-                    abi.encodeWithSelector(
-                        ITaggableFeeRouter.tagTokenDeposit.selector,
-                        token,
-                        market,
-                        amt,
-                        tag
-                    )
-                );
-            }
-        }
-
-        return ok;
-    }
-
     /**
      * @notice Removes the liquidity from the pool and transfers the tokens to the Airlock contract for a migration
      * @dev This function can only be called by the Airlock contract under specific conditions
@@ -1590,5 +1559,18 @@ contract Doppler is BaseHook {
         uint256 _bal1 = uint256(uint128(slugCallerDelta.amount1())) + extraBalance1;
         balance0 = _bal0 > uint256(type(uint128).max) ? type(uint128).max : uint128(_bal0);
         balance1 = _bal1 > uint256(type(uint128).max) ? type(uint128).max : uint128(_bal1);
+    }
+
+    /**
+     * @notice Sets fee router during Initializer.initialize()
+     * @dev Enables automatic fee routing for Performance Based Returns
+     * @param r FeeRouter address, stored globally in Airlock for all deployments
+     */
+    function setFeeRouter(address r) external {
+        if (msg.sender != initializer) revert SenderNotInitializer();
+        if (feeRouter != address(0)) revert FeeRecipientsAlreadySet();
+        if (r == address(0)) revert();
+
+        feeRouter = r;
     }
 }
