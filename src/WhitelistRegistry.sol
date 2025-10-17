@@ -9,13 +9,16 @@ pragma solidity ^0.8.24;
  */
 contract WhitelistRegistry {
     /// @notice Address of the Airlock contract
-    address public immutable airlock;
+    address public airlock;
 
     /// @notice Address of the AirlockMultisig contract
-    address public immutable airlockMultisig;
+    address public airlockMultisig;
 
     /// @notice Address of the MarketSunsetter contract
-    address public immutable marketSunsetter;
+    address public marketSunsetter;
+
+    /// @notice Initialization tag
+    bool public initialized;
 
     // ------------------------------------------
     //  Storage
@@ -47,6 +50,8 @@ contract WhitelistRegistry {
 
     error NotAllowed();
     error ZeroAddress();
+    error NeedZero();
+    error AlreadyInitialized();
 
     // ------------------------------------------
     //  Constructor
@@ -58,14 +63,26 @@ contract WhitelistRegistry {
         address _marketSunsetter
     ) {
         if (
-            address(_airlock) == address(0) || 
-            address(_airlockMultisig) == address(0) || 
-            address(_marketSunsetter) == address(0)
-        ) revert ZeroAddress();
+            address(_airlock) != address(0) || 
+            address(_airlockMultisig) != address(0) || 
+            address(_marketSunsetter) != address(0)
+        ) revert NeedZero();
+    }
 
-        airlock = _airlock;
-        airlockMultisig = _airlockMultisig;
-        marketSunsetter = _marketSunsetter;
+    function initialize(address airlock_, address airlockMultisig_, address marketSunsetter_) external {
+        if (initialized) revert AlreadyInitialized();
+
+        if (
+            airlock_ == address(0) || 
+            airlockMultisig_ == address(0) || 
+            marketSunsetter_ == address(0)
+        ) revert ZeroAddress();
+        
+        airlock = airlock_;
+        airlockMultisig = airlockMultisig_;
+        marketSunsetter = marketSunsetter_;
+        
+        initialized = true;
     }
 
     // ------------------------------------------
