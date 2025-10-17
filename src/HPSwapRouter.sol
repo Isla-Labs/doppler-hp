@@ -62,9 +62,10 @@ contract HPSwapRouter is ReentrancyGuard {
     event SweepETH(address indexed to, uint256 amount);
 
     error NotWhitelisted();
+    error ZeroAddress();
     error InvalidAmount();
     error Slippage();
-    error Expired;
+    error TxExpired();
     error BadRecipient();
     error InsufficientInput(uint256 expected, uint256 provided);
     error EthTransferFailed(uint256 amount, address to);
@@ -79,7 +80,7 @@ contract HPSwapRouter is ReentrancyGuard {
     // ------------------------------------------
 
     modifier checkDeadline(uint256 deadline) {
-        if (deadline != 0 && block.timestamp > deadline) revert Expired();
+        if (deadline != 0 && block.timestamp > deadline) revert TxExpired();
         _;
     }
 
@@ -98,15 +99,17 @@ contract HPSwapRouter is ReentrancyGuard {
         address _marketOrchestrator,
         address _usdc,
         address _weth,
-        address positionManager_,
+        address _positionManager,
         bytes32 ethUsdcPoolId_
     ) {
-        if (address(_poolManager) == address(0)) revert();
-        if (address(_registry) == address(0)) revert();
-        if (_marketOrchestrator == address(0)) revert();
-        if (_usdc == address(0)) revert();
-        if (_weth == address(0)) revert();
-        if (positionManager_ == address(0)) revert();
+        if (
+            address(_poolManager) == address(0) || 
+            address(_registry) == address(0) || 
+            _marketOrchestrator == address(0) || 
+            _usdc == address(0) || 
+            _weth == address(0) || 
+            _positionManager == address(0)
+        ) revert ZeroAddress();
 
         poolManager = _poolManager;
         registry = _registry;
@@ -114,7 +117,7 @@ contract HPSwapRouter is ReentrancyGuard {
 
         USDC = _usdc;
         WETH = _weth;
-        positionManager = positionManager_;
+        positionManager = _positionManager;
 
         if (ethUsdcPoolId_ != bytes32(0)) {
             (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
@@ -141,6 +144,8 @@ contract HPSwapRouter is ReentrancyGuard {
     // ------------------------------------------
 
     function rebindEthUsdc(bytes32 newPoolId) external onlyMarketOrchestrator {
+        if (newPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
+
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
             IPositionManager(positionManager).poolKeys(newPoolId);
 
@@ -207,6 +212,10 @@ contract HPSwapRouter is ReentrancyGuard {
         bool outIsPT = _isPlayerToken(outputToken);
         bool inIsETH = (inputToken == ETH_ADDR);
         bool outIsETH = (outputToken == ETH_ADDR);
+        bool inIsWETH = (inputToken == WETH);
+        bool outIsWETH = (outputToken == WETH);
+        bool inIsETHish = inIsETH || inIsWETH;
+        bool outIsETHish = outIsETH || outIsWETH;
         bool inIsUSDC = (inputToken == USDC);
         bool outIsUSDC = (outputToken == USDC);
 
@@ -218,6 +227,7 @@ contract HPSwapRouter is ReentrancyGuard {
             // PT(in) -> ETH
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
             _settleExactIn(Currency.wrap(inputToken), amountIn);
+
             bytes memory hop1 = abi.encode(MultiHopContext({ isMultiHop: true, isUsdc: false }));
             _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, hop1);
 
@@ -242,37 +252,40 @@ contract HPSwapRouter is ReentrancyGuard {
                 }
             }
 
-        } else if (inIsPT && outIsETH) {
+        } else if (inIsPT && outIsETHish) {
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
+
             _settleExactIn(Currency.wrap(inputToken), amountIn);
             _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, bytes(""));
-            res.amountOut = _managerOwed(Currency.wrap(ETH_ADDR));
-            if (res.amountOut != 0) poolManager.take(Currency.wrap(ETH_ADDR), recipient, res.amountOut);
 
-            if (migratedIn) {
-                uint256 bps = _migratorFeeBps(address(keyIn.hooks), res.amountOut);
-                res.totalFeesEth += _feeOnEthOutput(res.amountOut, bps);
-            } else {
-                res.totalFeesEth += _feeOnEthOutput(res.amountOut, 300);
+            res.amountOut = _managerOwed(Currency.wrap(ETH_ADDR));
+            if (res.amountOut != 0) {
+                if (outIsWETH) {
+                    poolManager.take(Currency.wrap(ETH_ADDR), address(this), res.amountOut);
+                    IWETH(WETH).deposit{ value: res.amountOut }();
+                    if (!IWETH(WETH).transfer(recipient, res.amountOut)) revert WethTransferFailed(res.amountOut, recipient);
+                } else {
+                    poolManager.take(Currency.wrap(ETH_ADDR), recipient, res.amountOut);
+                }
             }
 
-        } else if (outIsPT && inIsETH) {
+        } else if (outIsPT && inIsETHish) {
             (PoolKey memory keyOut, bool migratedOut) = _playerPoolKey(outputToken);
+
+            if (inIsWETH) {
+                IWETH(WETH).withdraw(amountIn);
+            }
+
             _settleExactIn(Currency.wrap(ETH_ADDR), amountIn);
             _swapExactIn(keyOut, /*zeroForOne*/ true, amountIn, bytes(""));
+
             res.amountOut = _managerOwed(Currency.wrap(outputToken));
             if (res.amountOut != 0) poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
-
-            if (migratedOut) {
-                uint256 bps = _migratorFeeBps(address(keyOut.hooks), amountIn);
-                res.totalFeesEth += _feeOnEthInput(amountIn, bps);
-            } else {
-                res.totalFeesEth += _feeOnEthInput(amountIn, 300);
-            }
 
         } else if (inIsPT && outIsUSDC) {
             // PT -> ETH (mark isUsdc=true to disable fee skip on first hop)
             if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
+
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
             PoolKey memory keyMid = _ethUsdcKey();
 
@@ -299,6 +312,7 @@ contract HPSwapRouter is ReentrancyGuard {
         } else if (outIsPT && inIsUSDC) {
             // USDC -> ETH -> PT
             if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
+
             PoolKey memory keyMid = _ethUsdcKey();
             (PoolKey memory keyOut, bool migratedOut) = _playerPoolKey(outputToken);
 
