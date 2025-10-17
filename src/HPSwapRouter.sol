@@ -125,7 +125,7 @@ contract HPSwapRouter is ReentrancyGuard {
             if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
                 revert BadEthUsdcBinding(ethUsdcPoolId_, c0a, c1a, address(h));
             }
-            
+
             ethUsdcFee = fee;
             ethUsdcTickSpacing = spacing;
             ethUsdcPoolId = ethUsdcPoolId_;
@@ -256,6 +256,7 @@ contract HPSwapRouter is ReentrancyGuard {
             } else {
                 res.totalFeesEth += _feeOnEthOutput(res.amountOut, 300);
             }
+
         } else if (outIsPT && inIsETH) {
             (PoolKey memory keyOut, bool migratedOut) = _playerPoolKey(outputToken);
             _settleExactIn(Currency.wrap(ETH_ADDR), amountIn);
@@ -269,6 +270,7 @@ contract HPSwapRouter is ReentrancyGuard {
             } else {
                 res.totalFeesEth += _feeOnEthInput(amountIn, 300);
             }
+
         } else if (inIsPT && outIsUSDC) {
             // PT -> ETH (mark isUsdc=true to disable fee skip on first hop)
             if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
@@ -294,6 +296,7 @@ contract HPSwapRouter is ReentrancyGuard {
             if (ethInterim > 0) {
                 res.totalFeesEth += _feeOnEthInput(ethInterim, _v4FeeBps(ethUsdcFee));
             }
+
         } else if (outIsPT && inIsUSDC) {
             // USDC -> ETH -> PT
             if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
@@ -325,6 +328,7 @@ contract HPSwapRouter is ReentrancyGuard {
                     res.totalFeesEth += _feeOnEthInput(ethInterim, 300);
                 }
             }
+            
         } else {
             revert NotWhitelisted();
         }
