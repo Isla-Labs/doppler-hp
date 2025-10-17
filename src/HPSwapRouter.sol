@@ -187,11 +187,10 @@ contract HPSwapRouter is ReentrancyGuard {
         address outputToken,
         uint256 amountIn,
         uint256 minOut,
-        address recipient,
         uint256 deadline
     ) external payable checkDeadline(deadline) nonReentrant returns (SwapResult memory res) {
-        if (recipient == address(0)) revert BadRecipient();
         if (amountIn == 0) revert InvalidAmount();
+        address recipient = msg.sender;
 
         // Accept ETH overpay; settle exact; refund delta at end
         uint256 expectedMin = (inputToken == ETH_ADDR) ? amountIn : 0;
@@ -328,7 +327,7 @@ contract HPSwapRouter is ReentrancyGuard {
                     res.totalFeesEth += _feeOnEthInput(ethInterim, 300);
                 }
             }
-            
+
         } else {
             revert NotWhitelisted();
         }
