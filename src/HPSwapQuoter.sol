@@ -118,7 +118,11 @@ contract HPSwapQuoter {
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
             IPositionManager(positionManager).poolKeys(newPoolId);
 
-        require(Currency.unwrap(c0) == ETH_ADDR && Currency.unwrap(c1) == USDC && address(h) == address(0), "BAD_ETH_USDC");
+        address c0a = Currency.unwrap(c0);
+        address c1a = Currency.unwrap(c1);
+        if (!(c0a == ETH_ADDR && c1a == USDC && address(h) == address(0))) {
+            revert BadEthUsdcBinding(newPoolId, c0a, c1a, address(h));
+        }
         
         ethUsdcFee = fee;
         ethUsdcTickSpacing = spacing;
