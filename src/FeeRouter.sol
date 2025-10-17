@@ -51,23 +51,16 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
         emit FeesReceived(msg.sender, msg.value);
     }
 
-    // called after ETH is received via poolManager.take
-    function tagETHDeposit(address market, uint256 amount, bytes32 tag) external onlyAuthorized(market) nonReentrant {
-        emit TaggedDeposit(address(0), market, msg.sender, amount, tag);
+    // Payable path used by Doppler to forward bonding ETH and auto-route 89% to rewards
+    function forwardBondingFee(address market) external payable onlyAuthorized(market) nonReentrant {
+        uint256 amount = msg.value;
+        emit TaggedDeposit(address(0), market, msg.sender, amount, bytes32("DOPPLER_FEE"));
 
-        // Auto-forward 89% to rewardsTreasury; keep remainder in contract
         uint256 forward = (amount * PBR_BPS) / BPS;
         if (forward > 0) {
-            uint256 bal = address(this).balance;
-            if (forward > bal) forward = bal; // be defensive
             (bool ok, ) = payable(rewardsTreasury).call{ value: forward }("");
             require(ok, "FWD_FAIL");
         }
-    }
-
-    // called after ERC20 is transferred to this contract
-    function tagTokenDeposit(address token, address market, uint256 amount, bytes32 tag) external onlyAuthorized(market) {
-        emit TaggedDeposit(token, market, msg.sender, amount, tag);
     }
 
     function updateRecipients(address[] calldata newRecipients, uint16[] calldata newBps) external onlyOwner { 
