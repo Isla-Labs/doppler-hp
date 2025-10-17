@@ -193,7 +193,7 @@ contract HPSwapRouter is ReentrancyGuard {
     }
 
     // ------------------------------------------
-    //  Entry Point (exact input)
+    //  Entry Point
     // ------------------------------------------
 
     /**
@@ -447,7 +447,7 @@ contract HPSwapRouter is ReentrancyGuard {
     }
 
     // ------------------------------------------
-    //  Internal helpers
+    //  Swap Helpers
     // ------------------------------------------
 
     /// @notice Internal helper to check playerToken activity status
