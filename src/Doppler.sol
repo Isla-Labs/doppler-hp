@@ -21,9 +21,9 @@ import { ProtocolFeeLibrary } from "@v4-core/libraries/ProtocolFeeLibrary.sol";
 import { SwapMath } from "@v4-core/libraries/SwapMath.sol";
 import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
-import { IFeeRouter } from "src/interfaces/IFeeRouter.sol";
 
 bytes4 constant ERC20_TRANSFER_SELECTOR = 0xa9059cbb; // transfer(address,uint256)
+bytes4 constant FORWARD_BONDING_FEE_SELECTOR = bytes4(keccak256("forwardBondingFee(address)")); // FeeRouter.forwardBondingFee(token)
 
 /// @notice Data for a liquidity slug, an intermediate representation of a `Position`
 /// @dev Output struct when computing slug data for a `Position`
@@ -1306,9 +1306,12 @@ contract Doppler is BaseHook {
         address market = Currency.unwrap(poolKey.currency1); // playerToken is currency1
 
         if (token == address(0)) {
-            (ok, ) = to.call{ value: amt }(
-                abi.encodeWithSelector(IFeeRouter.forwardBondingFee.selector, market)
-            );
+            // call feeRouter.forwardBondingFee(market) with value = amt
+            assembly {
+                mstore(0x00, FORWARD_BONDING_FEE_SELECTOR)
+                mstore(0x04, shl(96, market))      // abi-encode address
+                ok := call(gas(), to, amt, 0x00, 0x24, 0, 0)
+            }
         } else {
             assembly {
                 mstore(0x00, ERC20_TRANSFER_SELECTOR)
