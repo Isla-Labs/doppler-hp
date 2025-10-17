@@ -214,10 +214,11 @@ contract HPSwapRouter is ReentrancyGuard {
         bool outIsETH = (outputToken == ETH_ADDR);
         bool inIsWETH = (inputToken == WETH);
         bool outIsWETH = (outputToken == WETH);
-        bool inIsETHish = inIsETH || inIsWETH;
-        bool outIsETHish = outIsETH || outIsWETH;
         bool inIsUSDC = (inputToken == USDC);
         bool outIsUSDC = (outputToken == USDC);
+
+        bool inIsETHish = inIsETH || inIsWETH;
+        bool outIsETHish = outIsETH || outIsWETH;
 
         if (!inIsETH) {
             _pullFromUser(inputToken, amountIn);
