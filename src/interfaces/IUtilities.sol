@@ -2,6 +2,8 @@
 pragma solidity ^0.8.24;
 
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
+import { Currency } from "@v4-core/types/Currency.sol";
+import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 
 // Context for multi-hop swap coordination (disables double fee collection)
 struct MultiHopContext {
@@ -38,4 +40,11 @@ interface IV4Quoter {
     function quoteExactInputSingle(QuoteExactSingleParams calldata params)
         external
         returns (uint256 amountOut, uint256 gasEstimate);
+}
+
+interface IPositionManager {
+    function poolKeys(bytes32 poolId)
+        external
+        view
+        returns (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks);
 }
