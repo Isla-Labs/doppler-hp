@@ -2,16 +2,14 @@
 pragma solidity ^0.8.24;
 
 // Core
+import { ReentrancyGuard } from "openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
 import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
-import { IERC20, IPermit2, MultiHopContext, IPositionManager } from "src/interfaces/IUtilities.sol";
+import { IERC20, IWETH, IPermit2, MultiHopContext, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
-
-// Hardening
-import { ReentrancyGuard } from "openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
 
 struct SwapResult {
     uint256 amountOut;      // final output for the full route, including fee deductions
@@ -27,8 +25,11 @@ error Expired;
 
 /**
  * @title HP Swap Router
- * @dev Automatic pool detection and fee reduction for multihops
- * @custom:security-contact security@islalabs.co
+ * @dev Simple swap API with UR-style hardening and internal pipeline:
+ *      - Pool detection + hop sequencing
+ *      - ETH overpay accepted, settle exact, auto-refund (WETH fallback)
+ *      - ERC20 input ephemeral refund
+ *      - OZ ReentrancyGuard
  */
 contract HPSwapRouter is ReentrancyGuard {
     IPoolManager public immutable poolManager;
@@ -42,8 +43,9 @@ contract HPSwapRouter is ReentrancyGuard {
     // Canonical Permit2
     address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
-    // Mainnet/testnet USDC
+    // Tokens
     address public immutable USDC;
+    address public immutable WETH;
 
     // Migrated playerToken pool params
     uint24 public constant migratorFee = 1000;
@@ -82,6 +84,7 @@ contract HPSwapRouter is ReentrancyGuard {
         IWhitelistRegistry _registry,
         address _marketOrchestrator,
         address _usdc,
+        address _weth,
         address positionManager_,
         bytes32 ethUsdcPoolId_
     ) {
@@ -89,6 +92,7 @@ contract HPSwapRouter is ReentrancyGuard {
         if (address(_registry) == address(0)) revert();
         if (_marketOrchestrator == address(0)) revert();
         if (_usdc == address(0)) revert();
+        if (_weth == address(0)) revert();
         if (positionManager_ == address(0)) revert();
 
         poolManager = _poolManager;
@@ -96,6 +100,7 @@ contract HPSwapRouter is ReentrancyGuard {
         marketOrchestrator = _marketOrchestrator;
 
         USDC = _usdc;
+        WETH = _weth;
         positionManager = positionManager_;
 
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
@@ -127,7 +132,7 @@ contract HPSwapRouter is ReentrancyGuard {
         emit EthUsdcRebound(oldId, newPoolId, oldFee, fee, oldSpacing, spacing);
     }
 
-    // Admin safety sweeps (should be unnecessary with auto-refunds, but kept as last resort)
+    // Emergency-only fallback; router aims to be stateless via auto-refunds
     function sweepToken(address token, address to, uint256 amount) external onlyMarketOrchestrator {
         require(to != address(0), "bad to");
         require(IERC20(token).transfer(to, amount), "sweep token");
@@ -141,7 +146,7 @@ contract HPSwapRouter is ReentrancyGuard {
         emit SweepETH(to, amount);
     }
 
-    // ============ Single entry swap ============
+    // ============ Simple API (internals handle pipeline + hardening) ============
 
     // Detects: PT<->PT (via ETH), ETH<->PT, USDC<->PT (via ETH)
     // Pass minOut=0 or deadline=0 to disable either check.
@@ -153,18 +158,19 @@ contract HPSwapRouter is ReentrancyGuard {
         address recipient,
         uint256 deadline
     ) external payable checkDeadline(deadline) nonReentrant returns (SwapResult memory res) {
-        if (amountIn == 0) revert InvalidAmount();
         require(recipient != address(0), "bad recipient");
+        if (amountIn == 0) revert InvalidAmount();
 
-        // Accept ETH overpay for resilience; settle exact later and refund delta at end
+        // Accept ETH overpay; settle exact; refund delta at end
         uint256 expectedMin = (inputToken == ETH_ADDR) ? amountIn : 0;
         require(msg.value >= expectedMin, "insufficient msg.value");
 
-        // Ephemeral balance baselines (UR-like statelessness)
+        // Ephemeral baselines (UR-like statelessness)
         uint256 ethBase = address(this).balance - msg.value;
         uint256 erc20Base = (inputToken == ETH_ADDR) ? 0 : IERC20(inputToken).balanceOf(address(this));
-
         uint256 gasStart = gasleft();
+
+        // ---- Pipeline: settle -> swap hops -> take -> (fees tracked) ----
 
         bool inIsPT = _isPlayerToken(inputToken);
         bool outIsPT = _isPlayerToken(outputToken);
@@ -178,7 +184,7 @@ contract HPSwapRouter is ReentrancyGuard {
         }
 
         if (inIsPT && outIsPT) {
-            // First hop PT(in) -> ETH
+            // PT(in) -> ETH
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
             _settleExactIn(Currency.wrap(inputToken), amountIn);
             bytes memory hop1 = abi.encode(MultiHopContext({ isMultiHop: true, isUsdc: false }));
@@ -189,14 +195,12 @@ contract HPSwapRouter is ReentrancyGuard {
                 res.totalFeesEth += _feeOnEthOutput(ethInterim, 300);
             }
 
-            // Second hop ETH -> PT(out)
+            // ETH -> PT(out)
             (PoolKey memory keyOut, bool migratedOut) = _playerPoolKey(outputToken);
             if (ethInterim > 0) _swapExactIn(keyOut, /*zeroForOne*/ true, ethInterim, bytes(""));
 
             res.amountOut = _managerOwed(Currency.wrap(outputToken));
-            if (res.amountOut != 0) {
-                poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
-            }
+            if (res.amountOut != 0) poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
 
             if (ethInterim > 0) {
                 if (migratedOut) {
@@ -213,9 +217,8 @@ contract HPSwapRouter is ReentrancyGuard {
             _settleExactIn(Currency.wrap(inputToken), amountIn);
             _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, bytes(""));
             res.amountOut = _managerOwed(Currency.wrap(ETH_ADDR));
-            if (res.amountOut != 0) {
-                poolManager.take(Currency.wrap(ETH_ADDR), recipient, res.amountOut);
-            }
+            if (res.amountOut != 0) poolManager.take(Currency.wrap(ETH_ADDR), recipient, res.amountOut);
+
             if (migratedIn) {
                 uint256 bps = _migratorFeeBps(address(keyIn.hooks), res.amountOut);
                 res.totalFeesEth += _feeOnEthOutput(res.amountOut, bps);
@@ -227,9 +230,8 @@ contract HPSwapRouter is ReentrancyGuard {
             _settleExactIn(Currency.wrap(ETH_ADDR), amountIn);
             _swapExactIn(keyOut, /*zeroForOne*/ true, amountIn, bytes(""));
             res.amountOut = _managerOwed(Currency.wrap(outputToken));
-            if (res.amountOut != 0) {
-                poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
-            }
+            if (res.amountOut != 0) poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
+
             if (migratedOut) {
                 uint256 bps = _migratorFeeBps(address(keyOut.hooks), amountIn);
                 res.totalFeesEth += _feeOnEthInput(amountIn, bps);
@@ -237,6 +239,7 @@ contract HPSwapRouter is ReentrancyGuard {
                 res.totalFeesEth += _feeOnEthInput(amountIn, 300);
             }
         } else if (inIsPT && outIsUSDC) {
+            // PT -> ETH (mark isUsdc=true to disable fee skip on first hop)
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
             PoolKey memory keyMid = _ethUsdcKey();
 
@@ -252,18 +255,15 @@ contract HPSwapRouter is ReentrancyGuard {
                 res.totalFeesEth += _feeOnEthOutput(ethInterim, 300);
             }
 
-            if (ethInterim > 0) {
-                _swapExactIn(keyMid, /*zeroForOne*/ true, ethInterim, bytes(""));
-            }
+            if (ethInterim > 0) _swapExactIn(keyMid, /*zeroForOne*/ true, ethInterim, bytes(""));
             res.amountOut = _managerOwed(Currency.wrap(USDC));
-            if (res.amountOut != 0) {
-                poolManager.take(Currency.wrap(USDC), recipient, res.amountOut);
-            }
+            if (res.amountOut != 0) poolManager.take(Currency.wrap(USDC), recipient, res.amountOut);
 
             if (ethInterim > 0) {
                 res.totalFeesEth += _feeOnEthInput(ethInterim, _v4FeeBps(ethUsdcFee));
             }
         } else if (outIsPT && inIsUSDC) {
+            // USDC -> ETH -> PT
             PoolKey memory keyMid = _ethUsdcKey();
             (PoolKey memory keyOut, bool migratedOut) = _playerPoolKey(outputToken);
 
@@ -280,13 +280,9 @@ contract HPSwapRouter is ReentrancyGuard {
                 }
             }
 
-            if (ethInterim > 0) {
-                _swapExactIn(keyOut, /*zeroForOne*/ true, ethInterim, bytes(""));
-            }
+            if (ethInterim > 0) _swapExactIn(keyOut, /*zeroForOne*/ true, ethInterim, bytes(""));
             res.amountOut = _managerOwed(Currency.wrap(outputToken));
-            if (res.amountOut != 0) {
-                poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
-            }
+            if (res.amountOut != 0) poolManager.take(Currency.wrap(outputToken), recipient, res.amountOut);
 
             if (ethInterim > 0) {
                 if (migratedOut) {
@@ -302,14 +298,14 @@ contract HPSwapRouter is ReentrancyGuard {
 
         if (minOut != 0 && res.amountOut < minOut) revert Slippage();
 
-        // Auto-refunds (ephemeral balances)
+        // Auto-refunds (statelessness)
         _refundEthToSender(ethBase);
         if (inputToken != ETH_ADDR) _refundErc20ToSender(inputToken, erc20Base);
 
         res.totalGas = gasStart - gasleft();
     }
 
-    // ============ Internal V4 I/O ============
+    // ============ Internal I/O and helpers ============
 
     function _swapExactIn(
         PoolKey memory key,
@@ -329,7 +325,6 @@ contract HPSwapRouter is ReentrancyGuard {
     function _settleExactIn(Currency cIn, uint256 amount) internal {
         address t = Currency.unwrap(cIn);
         if (t == ETH_ADDR) {
-            // Accept overpay at entry; only forward the exact amount required
             poolManager.settle{ value: amount }();
         } else {
             poolManager.sync(cIn);
@@ -343,7 +338,7 @@ contract HPSwapRouter is ReentrancyGuard {
         return delta > 0 ? uint256(delta) : 0;
     }
 
-    // Opportunistically pull from user via Permit2 (if allowance exists) else ERC20.transferFrom
+    // Prefer Permit2 if allowance exists; fall back to ERC20.transferFrom
     function _pullFromUser(address token, uint256 amount) internal {
         (uint160 p2Amt, uint48 p2Exp, ) = IPermit2(PERMIT2).allowance(msg.sender, token, address(this));
         bool ok = p2Amt >= uint160(amount) && (p2Exp == 0 || p2Exp >= block.timestamp);
@@ -354,16 +349,19 @@ contract HPSwapRouter is ReentrancyGuard {
         }
     }
 
-    // ============ Auto-refund helpers (UR-like statelessness) ============
-
+    // Auto-refund ETH with WETH fallback (UR-like)
     function _refundEthToSender(uint256 ethBase) internal {
         uint256 refund = address(this).balance - ethBase;
         if (refund > 0) {
             (bool ok, ) = msg.sender.call{ value: refund }("");
-            require(ok, "eth refund");
+            if (!ok) {
+                IWETH(WETH).deposit{ value: refund }();
+                require(IWETH(WETH).transfer(msg.sender, refund), "weth refund");
+            }
         }
     }
 
+    // Auto-refund any ERC20 input delta to sender
     function _refundErc20ToSender(address token, uint256 base) internal {
         uint256 bal = IERC20(token).balanceOf(address(this));
         if (bal > base) {
@@ -372,7 +370,7 @@ contract HPSwapRouter is ReentrancyGuard {
         }
     }
 
-    // ============ PoolKey builders ============
+    // ============ PoolKey builders / fees / views ============
 
     function _playerPoolKey(address pt) internal view returns (PoolKey memory key, bool hasMigrated) {
         if (!registry.isMarketActive(pt)) revert NotWhitelisted();
@@ -403,8 +401,6 @@ contract HPSwapRouter is ReentrancyGuard {
         });
     }
 
-    // ============== Fee Helpers ==============
-
     // Uniswap v4 fee param is hundredths of a bip; convert to bps
     function _v4FeeBps(uint24 feeParam) internal pure returns (uint256) {
         return uint256(feeParam) / 100;
@@ -428,7 +424,7 @@ contract HPSwapRouter is ReentrancyGuard {
         return denom == 0 ? 0 : (ethOutNet * feeBps) / denom;
     }
 
-    // Uniswap fee on USDC input (reported in USDC, 6 decimals for Base USDC)
+    // Uniswap fee on USDC input (USDC 6d → reported as USDC)
     function _feeOnUsdcInput(uint256 usdcIn, uint256 feeBps) internal pure returns (uint256) {
         return (usdcIn * feeBps) / 10_000;
     }
@@ -438,8 +434,6 @@ contract HPSwapRouter is ReentrancyGuard {
         if (migratorHook == address(0)) return 0;
         return IMigratorHook(migratorHook).quoteEthPriceUsd(); // 6 decimals
     }
-
-    // ============ Views / helpers ============
 
     function _isPlayerToken(address token) internal view returns (bool) {
         return registry.isMarketActive(token);

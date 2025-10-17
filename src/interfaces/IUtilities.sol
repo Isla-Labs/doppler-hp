@@ -20,6 +20,13 @@ interface IERC20 {
     function transferFrom(address,address,uint256) external returns (bool);
 }
 
+// Minimal WETH
+interface IWETH {
+    function deposit() external payable;
+    function withdraw(uint256) external;
+    function transfer(address to, uint256 value) external returns (bool);
+}
+
 // Minimal Permit2
 interface IPermit2 {
     function allowance(address owner, address token, address spender)
