@@ -113,7 +113,7 @@ contract FeeRouter is ReentrancyGuard {
     }
 
     /// @notice Convert ERC20 balance (accrued during bonding) to ETH via HPSwapRouter
-    /// @dev Retroactively relays 89% of currency1 fees for Performance Based Returns
+    /// @dev Retroactively relays 89% of currency1 fees during migration for Performance Based Returns (non-blocking)
     function convertBondingFee(
         address token,        // ERC20 held by FeeRouter
         uint256 deadline
@@ -234,17 +234,7 @@ contract FeeRouter is ReentrancyGuard {
     //  Recovery
     // ------------------------------------------
 
-    /// @notice Emergency-only. Can recover failed ETH relays without blocking Doppler
-    function rescue(address to, uint256 amount) external onlyOrchestrator nonReentrant {
-        if (to == address(0)) revert ZeroAddress();
-
-        (bool ok, ) = to.call{ value: amount }("");
-        if (!ok) revert TransferFailed();
-
-        emit Recovered(to, amount, address(0));
-    }
-
-    /// @notice Emergency-only. Can recover failed playerToken redistribution without blocking Airlock
+    /// @notice Can recover failed playerToken redistribution without blocking Airlock
     function rescueToken(address token, address to, uint256 amount) external onlyOrchestrator nonReentrant {
         if (to == address(0) || token == address(0)) revert ZeroAddress();
 
