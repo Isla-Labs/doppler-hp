@@ -25,6 +25,8 @@ error WrongModuleState(address module, ModuleState expected, ModuleState actual)
 /// @notice Thrown when the lengths of two arrays do not match
 error ArrayLengthsMismatch();
 
+interface IFeeRouter { function convertBondingFee(address token) external; }
+
 /**
  * @notice Data related to the asset token
  * @param numeraire Address of the numeraire token
@@ -242,7 +244,7 @@ contract Airlock is Ownable {
 
         _updateMigrationStatus(asset);
 
-        IFeeRouter(feeRouter).convertBondingFee(asset, block.timestamp + 600);
+        IFeeRouter(feeRouter).convertBondingFee(asset);
 
         emit Migrate(asset, assetData.migrationPool);
     }

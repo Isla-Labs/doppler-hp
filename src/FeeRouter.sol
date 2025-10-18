@@ -115,8 +115,7 @@ contract FeeRouter is ReentrancyGuard {
     /// @notice Convert ERC20 balance (accrued during bonding) to ETH via HPSwapRouter
     /// @dev Retroactively relays 89% of currency1 fees during migration for Performance Based Returns (non-blocking)
     function convertBondingFee(
-        address token,        // ERC20 held by FeeRouter
-        uint256 deadline
+        address token         // ERC20 held by FeeRouter
     ) external onlyAirlock nonReentrant {
         // Hard-fail on bad input
         if (token == address(0)) revert ZeroAddress();
@@ -124,7 +123,7 @@ contract FeeRouter is ReentrancyGuard {
         uint256 amountIn = IERC20(token).balanceOf(address(this));
         if (amountIn == 0) return;
 
-        // Approve router if needed (non-blocking)
+        // Approve router if needed
         if (IERC20(token).allowance(address(this), swapRouter) < amountIn) {
             // approve(0)
             (bool ok0, bytes memory ret0) =
@@ -150,7 +149,7 @@ contract FeeRouter is ReentrancyGuard {
             address(0),
             amountIn,
             0,
-            deadline
+            block.timestamp + 120
         ) returns (IHPSwapRouter.SwapResult memory _sr) {
             sr = _sr;
         } catch {
@@ -161,7 +160,7 @@ contract FeeRouter is ReentrancyGuard {
         uint256 ethOut = sr.amountOut;
 
         if (ethOut > 0) {
-            // forward 89% to rewards (already non-blocking on send failure)
+            // forward 89% to rewards
             uint256 forward = (ethOut * PBR_BPS) / BPS;
             if (forward > 0) {
                 (bool sent, ) = payable(rewardsTreasury).call{ value: forward }("");
