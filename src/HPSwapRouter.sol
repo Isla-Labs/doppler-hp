@@ -75,11 +75,9 @@ contract HPSwapRouter is ReentrancyGuard {
     error ZeroAddress();
     error NotWhitelisted();
     error InvalidAmount();
-    error StrayETH();
-    error InsufficientInput(uint256 expected, uint256 provided);
+    error InsufficientETH(uint256 expected, uint256 provided);
     error Slippage();
     error TxExpired();
-    error BadRecipient();
     error BadEthUsdcBinding(bytes32 poolId, address currency0, address currency1, address hook);
     error EthUsdcPoolUnavailable();
     error Unauthorized();
@@ -208,8 +206,7 @@ contract HPSwapRouter is ReentrancyGuard {
         uint256 deadline
     ) external payable checkDeadline(deadline) nonReentrant returns (SwapResult memory res) {
         if (amountIn == 0) revert InvalidAmount();
-        if (inputToken != ETH && msg.value != 0) revert StrayETH();
-        if (inputToken == ETH && msg.value < amountIn) revert InsufficientInput(amountIn, msg.value);
+        if (inputToken == ETH && msg.value < amountIn) revert InsufficientETH(amountIn, msg.value);
 
         bytes memory ret = poolManager.unlock(
             abi.encode(SwapCtx({
@@ -242,7 +239,7 @@ contract HPSwapRouter is ReentrancyGuard {
         if (amountIn == 0) revert InvalidAmount();
 
         // Baselines (preserve original refund semantics, including ETH overpay)
-        uint256 ethBase = address(this).balance - ctx.ethAttached; // FIX
+        uint256 ethBase = address(this).balance - ctx.ethAttached;
         uint256 erc20Base = (inputToken == ETH) ? 0 : IERC20(inputToken).balanceOf(address(this));
         uint256 gasStart = gasleft();
 
