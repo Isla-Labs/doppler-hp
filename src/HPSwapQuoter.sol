@@ -185,6 +185,11 @@ contract HPSwapQuoter {
         bool inIsUSDC = (inputToken == USDC);
         bool outIsUSDC = (outputToken == USDC);
 
+        bool inIsWETH = (inputToken == WETH);
+        bool outIsWETH = (outputToken == WETH);
+        bool inIsETHish = inIsETH || inIsWETH;
+        bool outIsETHish = outIsETH || outIsWETH;
+
         if (inputToken == outputToken) {
             qr.amountOut = amountIn;
             return qr;
@@ -219,7 +224,7 @@ contract HPSwapQuoter {
         }
 
         // PT -> ETH (single hop) [ETH output]
-        if (inIsPT && outIsETH) {
+        if (inIsPT && outIsETHish) {
             (PoolKey memory key, bool migratedIn, address dopplerIn, address migratorIn) = _playerKeyAndHooks(inputToken);
             (uint256 ethOut, uint256 gas1) =
                 _quoteSingle(key, /*zeroForOne*/ false, amountIn, /*isMultiHopFirst=*/ false, /*isUsdc=*/ false);
@@ -237,7 +242,7 @@ contract HPSwapQuoter {
         }
 
         // ETH -> PT (single hop) [ETH input]
-        if (outIsPT && inIsETH) {
+        if (outIsPT && inIsETHish) {
             (PoolKey memory key, bool migratedOut, address dopplerOut, address migratorOut) = _playerKeyAndHooks(outputToken);
             (uint256 ptOut, uint256 gas1) =
                 _quoteSingle(key, /*zeroForOne*/ true, amountIn, /*isMultiHopFirst=*/ false, /*isUsdc=*/ false);
