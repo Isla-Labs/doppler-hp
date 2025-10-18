@@ -33,13 +33,13 @@ contract FeeRouter is ReentrancyGuard {
     event RecipientsUpdated(address[] recipients, uint16[] bps);
     event ForwardingFailed(address indexed to, address asset, uint256 amount);
     event Distributed(uint256 amount, uint256 nRecipients);
-    event Rescue(address indexed to, uint256 amount, address token);
+    event Recovered(address indexed to, uint256 amount, address token);
 
     error ZeroAddress();
     error Unauthorized();
     error InsufficientBalance(uint256 request, uint256 balance);
     error NoRecipients();
-    error TransferFailed(address indexed to, uint256 amt);
+    error TransferFailed();
     error BadParams();
     error Bps();
 
@@ -169,7 +169,7 @@ contract FeeRouter is ReentrancyGuard {
             if (i == n - 1) share = toDistribute - (sent - share);
             (bool ok, ) = to.call{ value: share }("");
 
-            if (!ok) revert TransferFailed(to, share);
+            if (!ok) revert TransferFailed();
         }
         
         emit Distributed(toDistribute, n);
@@ -207,16 +207,16 @@ contract FeeRouter is ReentrancyGuard {
         if (to == address(0)) revert ZeroAddress();
 
         (bool ok, ) = to.call{ value: amount }("");
-        if (!ok) revert TransferFailed(to, amount);
+        if (!ok) revert TransferFailed();
 
-        emit Rescue(to, amount, address(0));
+        emit Recovered(to, amount, address(0));
     }
 
-    function rescueToken(address token, address to, uint256 amount) external onlyOrchestrator {
+    function rescueToken(address token, address to, uint256 amount) external onlyOrchestrator nonReentrant {
         if (to == address(0) || token == address(0)) revert ZeroAddress();
 
         IERC20(token).safeTransfer(to, amount);
-        emit Rescue(to, amount, token);
+        emit Recovered(to, amount, token);
     }
 
     // ------------------------------------------
