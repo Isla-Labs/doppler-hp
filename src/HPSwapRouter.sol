@@ -2,13 +2,14 @@
 pragma solidity ^0.8.24;
 
 import { ReentrancyGuard } from "@openzeppelin/utils/ReentrancyGuard.sol";
+import { IERC20 } from "@openzeppelin/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/token/ERC20/utils/SafeERC20.sol";
 import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
-import { IERC20, IWETH, IPermit2, MultiHopContext, IPositionManager } from "src/interfaces/IUtilities.sol";
+import { IWETH, IPermit2, MultiHopContext, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
 /// @notice return schema for successful swap

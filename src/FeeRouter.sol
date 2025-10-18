@@ -3,11 +3,13 @@ pragma solidity ^0.8.24;
 
 import { Initializable } from "@openzeppelin/proxy/utils/Initializable.sol";
 import { ReentrancyGuard } from "@openzeppelin/utils/ReentrancyGuard.sol";
+import { IERC20 } from "@openzeppelin/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/token/ERC20/utils/SafeERC20.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 import { IHPSwapRouter } from "src/interfaces/IHPSwapRouter.sol";
-import { IERC20 } from "src/interfaces/IUtilities.sol";
 
 contract FeeRouter is Initializable, ReentrancyGuard {
+    using SafeERC20 for IERC20;
     
     address public rewardsTreasury;
     IWhitelistRegistry public whitelistRegistry;
@@ -32,26 +34,27 @@ contract FeeRouter is Initializable, ReentrancyGuard {
     event RecipientsUpdated(address[] recipients, uint16[] bps);
     event FeesReceived(address indexed from, uint256 amount);
     event Distributed(uint256 amount, uint256 nRecipients);
-    event Rescue(address indexed to, uint256 amount);
+    event Rescue(address indexed to, uint256 amount, address token);
 
     error ZeroAddress();
+    error Unauthorized();
 
     // ------------------------------------------
     //  Access Control
     // ------------------------------------------
 
     modifier onlyAuthorizedBondingCurve(address market) {
-        require(whitelistRegistry.isAuthorizedHookFor(market, msg.sender), "NOT_AUTH");
+        if (!whitelistRegistry.isAuthorizedHookFor(market, msg.sender)) revert Unauthorized();
         _;
     }
 
-    modifier onlyAirlock() { // new
-        require(msg.sender == airlock, "NOT_AIRLOCK");
+    modifier onlyAirlock() {
+        if (msg.sender != airlock) revert Unauthorized();
         _;
     }
 
     modifier onlyOrchestrator() {
-        require(msg.sender == orchestratorProxy, "UNAUTHORIZED");
+        if (msg.sender != orchestratorProxy) revert Unauthorized();
         _;
     }
 
@@ -116,8 +119,8 @@ contract FeeRouter is Initializable, ReentrancyGuard {
 
         // Approve router if needed
         if (IERC20(token).allowance(address(this), swapRouter) < amountIn) {
-            require(IERC20(token).approve(swapRouter, 0), "APPROVE_ZERO_FAIL");
-            require(IERC20(token).approve(swapRouter, amountIn), "APPROVE_FAIL");
+            IERC20(token).safeApprove(swapRouter, 0);
+            IERC20(token).safeApprove(swapRouter, amountIn);
         }
 
         // swap(token -> ETH) to this contract; minOut=0 per your simplification
@@ -186,16 +189,24 @@ contract FeeRouter is Initializable, ReentrancyGuard {
         _setRecipients(newRecipients, newBps); 
     }
 
+    // ------------------------------------------
+    //  Recovery
+    // ------------------------------------------
+
     function rescue(address to, uint256 amount) external onlyOrchestrator nonReentrant {
         require(to != address(0), "ZERO_TO");
+
         (bool ok, ) = to.call{ value: amount }("");
         require(ok, "RESCUE_FAIL");
-        emit Rescue(to, amount);
+
+        emit Rescue(to, amount, address(0));
     }
 
     function rescueToken(address token, address to, uint256 amount) external onlyOrchestrator {
         if (to == address(0) || token == address(0)) revert ZeroAddress();
-        require(IERC20(token).transfer(to, amount), "RESCUE_TOKEN_FAIL");
+
+        IERC20(token).safeTransfer(to, amount);
+        emit Rescue(to, amount, token);
     }
 
     // ------------------------------------------
