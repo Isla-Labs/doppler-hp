@@ -29,7 +29,7 @@ contract HPSwapQuoter {
     address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
     IV4Quoter public immutable quoter;
-    address public immutable marketOrchestrator;
+    address public immutable orchestratorProxy;
 
     // ------------------------------------------
     //  Pool Detection Config
@@ -64,8 +64,8 @@ contract HPSwapQuoter {
     //  Access Control
     // ------------------------------------------
 
-    modifier onlyMarketOrchestrator() {
-        if (msg.sender != marketOrchestrator) revert Unauthorized();
+    modifier onlyOrchestrator() {
+        if (msg.sender != orchestratorProxy) revert Unauthorized();
         _;
     }
 
@@ -77,7 +77,7 @@ contract HPSwapQuoter {
         IPoolManager _poolManager,
         IWhitelistRegistry _registry,
         IV4Quoter _quoter,
-        address _marketOrchestrator,
+        address _orchestratorProxy,
         address _positionManager,
         bytes32 _ethUsdcPoolId
     ) {
@@ -85,14 +85,14 @@ contract HPSwapQuoter {
             address(_poolManager) == address(0) || 
             address(_registry) == address(0) || 
             address(_quoter) == address(0) || 
-            _marketOrchestrator == address(0) || 
+            _orchestratorProxy == address(0) || 
             _positionManager == address(0)
         ) revert ZeroAddress();
 
         poolManager = _poolManager;
         registry = _registry;
         quoter = _quoter;
-        marketOrchestrator = _marketOrchestrator;
+        orchestratorProxy = _orchestratorProxy;
         positionManager = _positionManager;
 
         ETH = address(0);
@@ -132,7 +132,7 @@ contract HPSwapQuoter {
     //  Upkeep
     // ------------------------------------------
 
-    function rebindEthUsdc(bytes32 newPoolId) external onlyMarketOrchestrator {
+    function rebindEthUsdc(bytes32 newPoolId) external onlyOrchestrator {
         // Retrieve poolKey from poolId
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
             IPositionManager(positionManager).poolKeys(newPoolId);

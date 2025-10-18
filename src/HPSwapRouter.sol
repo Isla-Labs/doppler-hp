@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { ReentrancyGuard } from "@openzeppelin/security/ReentrancyGuard.sol";
+import { ReentrancyGuard } from "@openzeppelin/utils/ReentrancyGuard.sol";
 import { SafeERC20 } from "@openzeppelin/token/ERC20/utils/SafeERC20.sol";
 import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { IHooks } from "@v4-core/interfaces/IHooks.sol";
@@ -31,7 +31,7 @@ contract HPSwapRouter is ReentrancyGuard {
     IPoolManager public immutable poolManager;
     address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
-    address public immutable marketOrchestrator;
+    address public immutable orchestratorProxy;
 
     // ------------------------------------------
     //  Pool Detection Config
@@ -83,8 +83,8 @@ contract HPSwapRouter is ReentrancyGuard {
         _;
     }
 
-    modifier onlyMarketOrchestrator() {
-        if (msg.sender != marketOrchestrator) revert Unauthorized();
+    modifier onlyOrchestrator() {
+        if (msg.sender != orchestratorProxy) revert Unauthorized();
         _;
     }
 
@@ -95,20 +95,20 @@ contract HPSwapRouter is ReentrancyGuard {
     constructor(
         IPoolManager _poolManager,
         IWhitelistRegistry _registry,
-        address _marketOrchestrator,
+        address _orchestratorProxy,
         address _positionManager,
         bytes32 _ethUsdcPoolId
     ) {
         if (
             address(_poolManager) == address(0) || 
             address(_registry) == address(0) || 
-            _marketOrchestrator == address(0) || 
+            _orchestratorProxy == address(0) || 
             _positionManager == address(0)
         ) revert ZeroAddress();
 
         poolManager = _poolManager;
         registry = _registry;
-        marketOrchestrator = _marketOrchestrator;
+        orchestratorProxy = _orchestratorProxy;
         positionManager = _positionManager;
         
         ETH = address(0);
@@ -152,7 +152,7 @@ contract HPSwapRouter is ReentrancyGuard {
     // ------------------------------------------
 
     /// @notice Enables updateable eth/usdc pool parameters
-    function rebindEthUsdc(bytes32 newPoolId) external onlyMarketOrchestrator {
+    function rebindEthUsdc(bytes32 newPoolId) external onlyOrchestrator {
         if (newPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
 
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
@@ -177,14 +177,14 @@ contract HPSwapRouter is ReentrancyGuard {
     }
 
     /// @notice Emergency-only fallback; router aims to be stateless via auto-refunds
-    function sweepToken(address token, address to, uint256 amount) external onlyMarketOrchestrator {
+    function sweepToken(address token, address to, uint256 amount) external onlyOrchestrator {
         if (to == address(0)) revert BadRecipient();
         IERC20(token).safeTransfer(to, amount);
         emit SweepToken(token, to, amount);
     }
 
     /// @notice Emergency-only fallback; router aims to be stateless via auto-refunds
-    function sweepETH(address to, uint256 amount) external onlyMarketOrchestrator {
+    function sweepETH(address to, uint256 amount) external onlyOrchestrator {
         if (to == address(0)) revert BadRecipient();
 
         (bool s, ) = to.call{ value: amount }("");
