@@ -175,7 +175,7 @@ contract FeeRouter is ReentrancyGuard {
 
     /**
      * @notice Enables recipients to sweep feeRouter for remaining 11% split
-     * @dev Bonding fees are ephemeral so remaining ETH balance should be absolute;
+     * @dev Bonding fees are ephemeral for currency0 so remaining ETH balance should be absolute;
      *      playerToken balances are automatically swept during migration
      * @param amount Total ETH to distribute in wei
      */
