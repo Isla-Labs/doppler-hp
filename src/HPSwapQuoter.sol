@@ -54,6 +54,8 @@ contract HPSwapQuoter {
     //  Events/Errors
     // ------------------------------------------
 
+    event EthUsdcPoolUpdated(bytes32 oldPoolId, bytes32 newPoolId);
+
     error NotWhitelisted();
     error ZeroAddress();
     error BadEthUsdcBinding(bytes32 poolId, address currency0, address currency1, address hook);
@@ -132,7 +134,11 @@ contract HPSwapQuoter {
     //  Upkeep
     // ------------------------------------------
 
+    /// @notice Enables updateable eth/usdc pool parameters
     function rebindEthUsdc(bytes32 newPoolId) external onlyOrchestrator {
+        if (newPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
+        if (newPoolId == ethUsdcPoolId) return;
+
         // Retrieve poolKey from poolId
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
             IPositionManager(positionManager).poolKeys(newPoolId);
@@ -143,16 +149,28 @@ contract HPSwapQuoter {
             revert BadEthUsdcBinding(newPoolId, c0a, c1a, address(h));
         }
 
+        bytes32 oldId = ethUsdcPoolId;
+
         ethUsdcBase = c0a;
         ethUsdcFee = fee;
         ethUsdcTickSpacing = spacing;
         ethUsdcPoolId = newPoolId;
+
+        emit EthUsdcPoolUpdated(oldId, newPoolId);
     }
 
     // ------------------------------------------
     //  Entry Point
     // ------------------------------------------
 
+    /**
+     * @notice Quote entry point for inputAmount -> outputAmount simulation
+     * @dev (ETH <> playerToken), (USDC <> playerToken), (playerToken <> playerToken)
+     * @param inputToken Address of the whitelisted token to swap from
+     * @param outputToken Address of the whitelisted token to swap to
+     * @param amountIn Total amount to swap in wei
+     * @return QuoteResult Successful quote returns amountOut, totalGas, totalFeesEth
+     */
     function quote(
         address inputToken,
         address outputToken,
@@ -304,6 +322,12 @@ contract HPSwapQuoter {
     //  Input/Output
     // ------------------------------------------
 
+    /// @notice Internal helper to check playerToken activity status
+    function _isPlayerToken(address token) internal view returns (bool) {
+        return registry.isMarketActive(token);
+    }
+
+    /// @notice Calls V4Quoter for swap quote
     function _quoteSingle(
         PoolKey memory key,
         bool zeroForOne,
@@ -325,9 +349,49 @@ contract HPSwapQuoter {
     }
 
     // ------------------------------------------
+    //  Fee Helpers
+    // ------------------------------------------
+
+    /// @notice Convert Uniswap v4 fee param (hundredths of a bip) to bps
+    function _v4FeeBps(uint24 feeParam) internal pure returns (uint256) {
+        return uint256(feeParam) / 100;
+    }
+
+    /// @notice Fetches dynamic fee bps from migrator hook
+    function _migratorFeeBps(address migratorHook, uint256 volumeEth) internal view returns (uint256) {
+        if (migratorHook == address(0)) return 0;
+        (uint256 feeBps, ) = IMigratorHook(migratorHook).simulateDynamicFee(volumeEth);
+        return feeBps;
+    }
+
+    /// @notice Calculates fee when charged on ETH input (exact)
+    function _feeOnEthInput(uint256 ethIn, uint256 feeBps) internal pure returns (uint256) {
+        return (ethIn * feeBps) / 10_000;
+    }
+
+    /// @notice Calculates fee when charged on ETH output (net → gross adjustment)
+    function _feeOnEthOutput(uint256 ethOutNet, uint256 feeBps) internal pure returns (uint256) {
+        uint256 denom = 10_000 - feeBps;
+        return denom == 0 ? 0 : (ethOutNet * feeBps) / denom;
+    }
+
+    /// @notice Calculates Uniswap v4 fee on USDC input
+    function _feeOnUsdcInput(uint256 usdcIn, uint256 feeBps) internal pure returns (uint256) {
+        return (usdcIn * feeBps) / 10_000;
+    }
+
+    /// @notice Fetches ETH price for approximate value conversion (USDC -> ETH)
+    function _ethPriceUsdFromToken(address pt) internal view returns (uint256) {
+        (, address migratorHook) = registry.getHooks(pt);
+        if (migratorHook == address(0)) return 0;
+        return IMigratorHook(migratorHook).quoteEthPriceUsd(); // 6 decimals
+    }
+
+    // ------------------------------------------
     //  PoolKey Construction
     // ------------------------------------------
 
+    /// @notice Detect bonding status and automatically construct poolKey for playerToken
     function _playerKeyAndHooks(address pt)
         internal
         view
@@ -351,6 +415,7 @@ contract HPSwapQuoter {
         }
     }
 
+    /// @notice Automatically construct poolKey for ETH/USDC (derived from Uniswap v4 poolId)
     function _ethUsdcKey() internal view returns (PoolKey memory key) {
         key = PoolKey({
             currency0: Currency.wrap(ethUsdcBase),
@@ -359,51 +424,5 @@ contract HPSwapQuoter {
             fee: ethUsdcFee,
             tickSpacing: ethUsdcTickSpacing
         });
-    }
-
-    // ------------------------------------------
-    //  Fee Helpers
-    // ------------------------------------------
-
-    // Uniswap v4 fee param is hundredths of a bip; convert to bps
-    function _v4FeeBps(uint24 feeParam) internal pure returns (uint256) {
-        return uint256(feeParam) / 100;
-    }
-
-    // Dynamic fee bps from migrator hook (ignores ethPriceUsd here)
-    function _migratorFeeBps(address migratorHook, uint256 volumeEth) internal view returns (uint256) {
-        if (migratorHook == address(0)) return 0;
-        (uint256 feeBps, ) = IMigratorHook(migratorHook).simulateDynamicFee(volumeEth);
-        return feeBps;
-    }
-
-    // Fee when charged on ETH input (exact)
-    function _feeOnEthInput(uint256 ethIn, uint256 feeBps) internal pure returns (uint256) {
-        return (ethIn * feeBps) / 10_000;
-    }
-
-    // Fee when charged on ETH output (net → gross adjustment)
-    function _feeOnEthOutput(uint256 ethOutNet, uint256 feeBps) internal pure returns (uint256) {
-        uint256 denom = 10_000 - feeBps;
-        return denom == 0 ? 0 : (ethOutNet * feeBps) / denom;
-    }
-
-    // Uniswap fee on USDC input (reported in USDC, 6 decimals for Base USDC)
-    function _feeOnUsdcInput(uint256 usdcIn, uint256 feeBps) internal pure returns (uint256) {
-        return (usdcIn * feeBps) / 10_000;
-    }
-
-    // ------------------------------------------
-    //  Helpers
-    // ------------------------------------------
-
-    function _isPlayerToken(address token) internal view returns (bool) {
-        return registry.isMarketActive(token);
-    }
-
-    function _ethPriceUsdFromToken(address pt) internal view returns (uint256) {
-        (, address migratorHook) = registry.getHooks(pt);
-        if (migratorHook == address(0)) return 0;
-        return IMigratorHook(migratorHook).quoteEthPriceUsd(); // 6 decimals
     }
 }
