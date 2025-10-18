@@ -61,8 +61,6 @@ contract HPSwapRouter is ReentrancyGuard {
     // ------------------------------------------
 
     event EthUsdcPoolUpdated(bytes32 oldPoolId, bytes32 newPoolId);
-    event SweepToken(address indexed token, address indexed to, uint256 amount);
-    event SweepETH(address indexed to, uint256 amount);
 
     error ZeroAddress();
     error NotWhitelisted();
@@ -146,7 +144,8 @@ contract HPSwapRouter is ReentrancyGuard {
         }
     }
 
-    receive() external payable {}
+    receive() external payable { revert("DIRECT_ETH_DISABLED"); }
+	fallback() external payable { revert("DIRECT_ETH_DISABLED"); }
 
     // ------------------------------------------
     //  Upkeep
@@ -174,22 +173,6 @@ contract HPSwapRouter is ReentrancyGuard {
         ethUsdcPoolId = newPoolId;
 
         emit EthUsdcPoolUpdated(oldId, newPoolId);
-    }
-
-    /// @notice Emergency-only fallback; router aims to be stateless via auto-refunds
-    function sweepToken(address token, address to, uint256 amount) external onlyOrchestrator {
-        if (to == address(0)) revert BadRecipient();
-        IERC20(token).safeTransfer(to, amount);
-        emit SweepToken(token, to, amount);
-    }
-
-    /// @notice Emergency-only fallback; router aims to be stateless via auto-refunds
-    function sweepETH(address to, uint256 amount) external onlyOrchestrator {
-        if (to == address(0)) revert BadRecipient();
-
-        (bool s, ) = to.call{ value: amount }("");
-        if (!s) revert();
-        emit SweepETH(to, amount);
     }
 
     // ------------------------------------------
