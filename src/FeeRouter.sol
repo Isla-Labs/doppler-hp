@@ -34,6 +34,8 @@ contract FeeRouter is ReentrancyGuard {
     event ForwardingFailed(address indexed to, address asset, uint256 amount);
     event Distributed(uint256 amount, uint256 nRecipients);
     event Recovered(address indexed to, uint256 amount, address token);
+    event ApproveFailed(address indexed token, address indexed spender, uint256 amount);
+    event SwapFailed(address indexed tokenIn, address indexed tokenOut, uint256 amountIn);
 
     error ZeroAddress();
     error Unauthorized();
@@ -98,7 +100,8 @@ contract FeeRouter is ReentrancyGuard {
     //  Bonding Fee Routing
     // ------------------------------------------
 
-    /// @notice Payable path used by Doppler to forward bonding ETH and auto-route 89% to rewards
+    /// @notice Payable path used by Doppler to forward bonding fees to rewardsTreasury
+    /// @dev Automatically relays 89% of currency0 fees for Performance Based Returns
     function forwardBondingFee(address market) external payable onlyBondingCurve(market) nonReentrant {
         uint256 amount = msg.value;
 
@@ -115,30 +118,50 @@ contract FeeRouter is ReentrancyGuard {
         address token,        // ERC20 held by FeeRouter
         uint256 deadline
     ) external onlyAirlock nonReentrant {
+        // Hard-fail on bad input
         if (token == address(0)) revert ZeroAddress();
 
         uint256 amountIn = IERC20(token).balanceOf(address(this));
         if (amountIn == 0) return;
 
-        // Approve router if needed
+        // Approve router if needed (non-blocking)
         if (IERC20(token).allowance(address(this), swapRouter) < amountIn) {
-            IERC20(token).safeApprove(swapRouter, 0);
-            IERC20(token).safeApprove(swapRouter, amountIn);
+            // approve(0)
+            (bool ok0, bytes memory ret0) =
+                token.call(abi.encodeWithSelector(IERC20.approve.selector, swapRouter, 0));
+            if (!ok0 || (ret0.length != 0 && !abi.decode(ret0, (bool)))) {
+                emit ApproveFailed(token, swapRouter, 0);
+                return;
+            }
+
+            // approve(amountIn)
+            (bool ok1, bytes memory ret1) =
+                token.call(abi.encodeWithSelector(IERC20.approve.selector, swapRouter, amountIn));
+            if (!ok1 || (ret1.length != 0 && !abi.decode(ret1, (bool)))) {
+                emit ApproveFailed(token, swapRouter, amountIn);
+                return;
+            }
         }
 
-        // swap(token -> ETH) to this contract; minOut=0 per your simplification
-        IHPSwapRouter.SwapResult memory sr = IHPSwapRouter(swapRouter).swap(
+        // swap(token -> ETH) to this contract; minOut=0
+        IHPSwapRouter.SwapResult memory sr;
+        try IHPSwapRouter(swapRouter).swap(
             token,
             address(0),
             amountIn,
             0,
             deadline
-        );
+        ) returns (IHPSwapRouter.SwapResult memory _sr) {
+            sr = _sr;
+        } catch {
+            emit SwapFailed(token, address(0), amountIn);
+            return;
+        }
 
         uint256 ethOut = sr.amountOut;
 
         if (ethOut > 0) {
-            // forward 89% to rewards
+            // forward 89% to rewards (already non-blocking on send failure)
             uint256 forward = (ethOut * PBR_BPS) / BPS;
             if (forward > 0) {
                 (bool sent, ) = payable(rewardsTreasury).call{ value: forward }("");
@@ -151,6 +174,12 @@ contract FeeRouter is ReentrancyGuard {
     //  Standard Fee Distribution
     // ------------------------------------------
 
+    /**
+     * @notice Enables recipients to sweep feeRouter for remaining 11% split
+     * @dev Bonding fees are ephemeral so remaining ETH balance should be absolute;
+     *      playerToken balances are automatically swept during migration
+     * @param amount Total ETH to distribute in wei
+     */
     function distribute(uint256 amount) external onlyOrchestrator nonReentrant {
         uint256 bal = address(this).balance;
         uint256 toDistribute = amount == 0 ? bal : amount;
@@ -179,10 +208,12 @@ contract FeeRouter is ReentrancyGuard {
     //  Upkeep
     // ------------------------------------------
 
+    /// @notice External entrypoint gated by GnosisOrchestrator to update distribute() recipients
     function updateRecipients(address[] calldata newRecipients, uint16[] calldata newBps) external onlyOrchestrator { 
         _setRecipients(newRecipients, newBps); 
     }
 
+    /// @notice Internal relay for setting recipients, called by updateRecipients and constructor
     function _setRecipients(address[] memory newRecipients, uint16[] memory newBps) internal {
         if (newRecipients.length != newBps.length || newRecipients.length == 0) revert BadParams();
 
@@ -203,6 +234,7 @@ contract FeeRouter is ReentrancyGuard {
     //  Recovery
     // ------------------------------------------
 
+    /// @notice Emergency-only. Can recover failed ETH relays without blocking Doppler
     function rescue(address to, uint256 amount) external onlyOrchestrator nonReentrant {
         if (to == address(0)) revert ZeroAddress();
 
@@ -212,6 +244,7 @@ contract FeeRouter is ReentrancyGuard {
         emit Recovered(to, amount, address(0));
     }
 
+    /// @notice Emergency-only. Can recover failed playerToken redistribution without blocking Airlock
     function rescueToken(address token, address to, uint256 amount) external onlyOrchestrator nonReentrant {
         if (to == address(0) || token == address(0)) revert ZeroAddress();
 
@@ -223,5 +256,6 @@ contract FeeRouter is ReentrancyGuard {
     //  View
     // ------------------------------------------
 
+    /// @notice Count recipients
     function recipientsLength() external view returns (uint256) { return recipients.length; }
 }
