@@ -26,6 +26,7 @@ struct SwapCtx {
     address outputToken;
     uint256 amountIn;
     uint256 minOut;
+    uint256 ethAttached;
 }
 
 /**
@@ -207,7 +208,7 @@ contract HPSwapRouter is ReentrancyGuard {
         uint256 deadline
     ) external payable checkDeadline(deadline) nonReentrant returns (SwapResult memory res) {
         if (amountIn == 0) revert InvalidAmount();
-        if (msg.value > 0) revert StrayETH();
+        if (inputToken != ETH && msg.value != 0) revert StrayETH();
         if (inputToken == ETH && msg.value < amountIn) revert InsufficientInput(amountIn, msg.value);
 
         bytes memory ret = poolManager.unlock(
@@ -216,7 +217,8 @@ contract HPSwapRouter is ReentrancyGuard {
                 inputToken: inputToken,
                 outputToken: outputToken,
                 amountIn: amountIn,
-                minOut: minOut
+                minOut: minOut,
+                ethAttached: msg.value
             }))
         );
         res = abi.decode(ret, (SwapResult));
@@ -224,7 +226,7 @@ contract HPSwapRouter is ReentrancyGuard {
 
     /**
      * @notice Unlock callback for PoolManager interaction with full router logic
-     * @param data ABI-encoded SwapCtx { caller, inputToken, outputToken, amountIn, minOut }
+     * @param data ABI-encoded SwapCtx { caller, inputToken, outputToken, amountIn, minOut, ethAttached }
      * @return result ABI-encoded SwapResult { amountOut, totalGas, totalFeesEth }
      */
     function unlockCallback(bytes calldata data) external payable returns (bytes memory result) {
@@ -239,8 +241,8 @@ contract HPSwapRouter is ReentrancyGuard {
 
         if (amountIn == 0) revert InvalidAmount();
 
-        // Baselines for stateless refunds
-        uint256 ethBase = address(this).balance;
+        // Baselines (preserve original refund semantics, including ETH overpay)
+        uint256 ethBase = address(this).balance - ctx.ethAttached; // FIX
         uint256 erc20Base = (inputToken == ETH) ? 0 : IERC20(inputToken).balanceOf(address(this));
         uint256 gasStart = gasleft();
 
