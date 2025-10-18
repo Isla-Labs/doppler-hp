@@ -1,33 +1,47 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import { Initializable } from "@openzeppelin/proxy/utils/Initializable.sol";
+import { ReentrancyGuard } from "@openzeppelin/utils/ReentrancyGuard.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 import { IHPSwapRouter } from "src/interfaces/IHPSwapRouter.sol";
 import { IERC20 } from "src/interfaces/IUtilities.sol";
 
-contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgradeable {
-    uint256 public constant BPS = 10_000;
-
-    uint256 public constant PBR_BPS = 8900;
-
+contract FeeRouter is Initializable, ReentrancyGuard {
+    
     address public rewardsTreasury;
-    IWhitelistRegistry public registry;
+    IWhitelistRegistry public whitelistRegistry;
+    address public orchestratorProxy;
     address public airlock;
     address public swapRouter;
 
+    // ------------------------------------------
+    //  Config
+    // ------------------------------------------
+
     address[] public recipients;
     uint16[] public recipientsBps; // sums to 10_000
+
+    uint256 public constant BPS = 10_000;
+    uint256 public constant PBR_BPS = 8900;
+
+    // ------------------------------------------
+    //  Events/Errors
+    // ------------------------------------------
 
     event RecipientsUpdated(address[] recipients, uint16[] bps);
     event FeesReceived(address indexed from, uint256 amount);
     event Distributed(uint256 amount, uint256 nRecipients);
     event Rescue(address indexed to, uint256 amount);
 
-    modifier onlyAuthorized(address market) {
-        require(registry.isAuthorizedHookFor(market, msg.sender), "NOT_AUTH");
+    error ZeroAddress();
+
+    // ------------------------------------------
+    //  Access Control
+    // ------------------------------------------
+
+    modifier onlyAuthorizedBondingCurve(address market) {
+        require(whitelistRegistry.isAuthorizedHookFor(market, msg.sender), "NOT_AUTH");
         _;
     }
 
@@ -36,26 +50,35 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
         _;
     }
 
+    modifier onlyOrchestrator() {
+        require(msg.sender == orchestratorProxy, "UNAUTHORIZED");
+        _;
+    }
+
+    // ------------------------------------------
+    //  Initialization
+    // ------------------------------------------
+
     constructor() { _disableInitializers(); }
 
     function initialize(
-        address owner_,
         address rewardsTreasury_,
-        address registry_,
+        address orchestratorProxy_,
+        address whitelistRegistry_,
         address airlock_,
         address swapRouter_
     ) external initializer {
-        require(owner_ != address(0), "ZERO_OWNER");
-        require(rewardsTreasury_ != address(0), "ZERO_REWARDS");
-        require(registry_ != address(0), "ZERO_REGISTRY");
-        require(airlock_ != address(0), "ZERO_AIRLOCK");
-        require(swapRouter_ != address(0), "ZERO_SWAP_ROUTER");
+        if (
+            rewardsTreasury_ == address(0) || 
+            orchestratorProxy_ == address(0) || 
+            whitelistRegistry_ == address(0) || 
+            airlock_ == address(0) || 
+            swapRouter_ == address(0)
+        ) revert ZeroAddress();
 
-        __Ownable2Step_init();
-        __ReentrancyGuard_init();
-        _transferOwnership(owner_);
         rewardsTreasury = rewardsTreasury_;
-        registry = IWhitelistRegistry(registry_);
+        orchestratorProxy = orchestratorProxy_;
+        whitelistRegistry = IWhitelistRegistry(whitelistRegistry_);
         airlock = airlock_;
         swapRouter = swapRouter_;
     }
@@ -64,8 +87,12 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
         emit FeesReceived(msg.sender, msg.value);
     }
 
-    // Payable path used by Doppler to forward bonding ETH and auto-route 89% to rewards
-    function forwardBondingFee(address market) external payable onlyAuthorized(market) nonReentrant {
+    // ------------------------------------------
+    //  Bonding Fee Management
+    // ------------------------------------------
+
+    /// @notice Payable path used by Doppler to forward bonding ETH and auto-route 89% to rewards
+    function forwardBondingFee(address market) external payable onlyAuthorizedBondingCurve(market) nonReentrant {
         uint256 amount = msg.value;
 
         uint256 forward = (amount * PBR_BPS) / BPS;
@@ -89,6 +116,7 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
 
         // Approve router if needed
         if (IERC20(token).allowance(address(this), swapRouter) < amountIn) {
+            require(IERC20(token).approve(swapRouter, 0), "APPROVE_ZERO_FAIL");
             require(IERC20(token).approve(swapRouter, amountIn), "APPROVE_FAIL");
         }
 
@@ -113,9 +141,9 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
         }
     }
 
-    function updateRecipients(address[] calldata newRecipients, uint16[] calldata newBps) external onlyOwner { 
-        _setRecipients(newRecipients, newBps); 
-    }
+    // ------------------------------------------
+    //  Fee Distribution
+    // ------------------------------------------
 
     function distribute(uint256 amount) external nonReentrant {
         uint256 bal = address(this).balance;
@@ -136,14 +164,9 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
         emit Distributed(toDistribute, n);
     }
 
-    function rescue(address to, uint256 amount) external onlyOwner nonReentrant {
-        require(to != address(0), "ZERO_TO");
-        (bool ok, ) = to.call{ value: amount }("");
-        require(ok, "RESCUE_FAIL");
-        emit Rescue(to, amount);
-    }
-
-    function recipientsLength() external view returns (uint256) { return recipients.length; }
+    // ------------------------------------------
+    //  Upkeep
+    // ------------------------------------------
 
     function _setRecipients(address[] calldata newRecipients, uint16[] calldata newBps) internal {
         require(newRecipients.length == newBps.length, "LEN_MISMATCH");
@@ -158,4 +181,26 @@ contract FeeRouter is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpg
         recipientsBps = newBps;
         emit RecipientsUpdated(newRecipients, newBps);
     }
+
+    function updateRecipients(address[] calldata newRecipients, uint16[] calldata newBps) external onlyOrchestrator { 
+        _setRecipients(newRecipients, newBps); 
+    }
+
+    function rescue(address to, uint256 amount) external onlyOrchestrator nonReentrant {
+        require(to != address(0), "ZERO_TO");
+        (bool ok, ) = to.call{ value: amount }("");
+        require(ok, "RESCUE_FAIL");
+        emit Rescue(to, amount);
+    }
+
+    function rescueToken(address token, address to, uint256 amount) external onlyOrchestrator {
+        if (to == address(0) || token == address(0)) revert ZeroAddress();
+        require(IERC20(token).transfer(to, amount), "RESCUE_TOKEN_FAIL");
+    }
+
+    // ------------------------------------------
+    //  View
+    // ------------------------------------------
+
+    function recipientsLength() external view returns (uint256) { return recipients.length; }
 }
