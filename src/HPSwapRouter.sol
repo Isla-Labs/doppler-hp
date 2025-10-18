@@ -20,7 +20,7 @@ struct SwapResult {
 
 /**
  * @title HP Swap Router
- * @dev Simple swap API with automatic pool detection, fee reduction for multihops, and UR-style hardening
+ * @dev Swap API with automatic pool detection, fee reduction for multihops, and UR-style hardening
  * @author Isla Labs
  * @custom:security-contact security@islalabs.co
  */
@@ -199,8 +199,8 @@ contract HPSwapRouter is ReentrancyGuard {
     /**
      * @notice Swap entry point for exact in single
      * @dev (ETH <> playerToken), (USDC <> playerToken), (playerToken <> playerToken)
-     * @param inputToken Address of the whitelisted token to use as currency0
-     * @param outputToken Address of the whitelisted token to use as currency1
+     * @param inputToken Address of the whitelisted token to swap from
+     * @param outputToken Address of the whitelisted token to swap to
      * @param amountIn Total amount to swap in wei
      * @param minOut Slippage-adjusted minimum output in wei (minOut=0 disables slippage protection)
      * @param deadline Unix timestamp for execution deadline, e.g. block.timestamp + 600 (deadline=0 disables time bound)
