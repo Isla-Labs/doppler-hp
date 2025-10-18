@@ -12,7 +12,6 @@ interface IHPSwapRouter {
         address outputToken,
         uint256 amountIn,
         uint256 minOut,
-        address recipient,
         uint256 deadline
     ) external payable returns (SwapResult memory);
 }
