@@ -167,9 +167,9 @@ contract WhitelistRegistry {
         return tokenSets[token].isActive;
     }
 
-    function isAuthorizedHookFor(address token, address hook) external view returns (bool) {
+    function isAuthorizedBondingCurve(address token, address hook) external view returns (bool) {
         TokenSet storage ts = tokenSets[token];
-        return hook == ts.dopplerHook || hook == ts.migratorHook;
+        return hook == ts.dopplerHook;
     }
 
     function getHooks(address token) external view returns (address dopplerHook, address migratorHook) {

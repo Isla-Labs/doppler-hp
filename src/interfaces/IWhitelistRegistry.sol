@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 interface IWhitelistRegistry {
     function isMarketActive(address token) external view returns (bool);
-    function isAuthorizedHookFor(address token, address hook) external view returns (bool);
+    function isAuthorizedBondingCurve(address token, address hook) external view returns (bool);
     function getHooks(address token) external view returns (address dopplerHook, address migratorHook);
     function hasMigrated(address token) external view returns (bool);
     function tokenSets(address token) external view returns (

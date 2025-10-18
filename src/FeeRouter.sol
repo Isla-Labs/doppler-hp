@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { Initializable } from "@openzeppelin/proxy/utils/Initializable.sol";
 import { ReentrancyGuard } from "@openzeppelin/utils/ReentrancyGuard.sol";
 import { IERC20 } from "@openzeppelin/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/token/ERC20/utils/SafeERC20.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 import { IHPSwapRouter } from "src/interfaces/IHPSwapRouter.sol";
 
-contract FeeRouter is Initializable, ReentrancyGuard {
+contract FeeRouter is ReentrancyGuard {
     using SafeERC20 for IERC20;
     
-    address public rewardsTreasury;
-    IWhitelistRegistry public whitelistRegistry;
-    address public orchestratorProxy;
-    address public airlock;
-    address public swapRouter;
+    address public immutable rewardsTreasury;
+    IWhitelistRegistry public immutable whitelistRegistry;
+    address public immutable orchestratorProxy;
+    address public immutable airlock;
+    address public immutable swapRouter;
 
     // ------------------------------------------
     //  Config
@@ -32,19 +31,24 @@ contract FeeRouter is Initializable, ReentrancyGuard {
     // ------------------------------------------
 
     event RecipientsUpdated(address[] recipients, uint16[] bps);
-    event FeesReceived(address indexed from, uint256 amount);
+    event ForwardingFailed(address indexed to, address asset, uint256 amount);
     event Distributed(uint256 amount, uint256 nRecipients);
     event Rescue(address indexed to, uint256 amount, address token);
 
     error ZeroAddress();
     error Unauthorized();
+    error InsufficientBalance(uint256 request, uint256 balance);
+    error NoRecipients();
+    error TransferFailed(address indexed to, uint256 amt);
+    error BadParams();
+    error Bps();
 
     // ------------------------------------------
     //  Access Control
     // ------------------------------------------
 
-    modifier onlyAuthorizedBondingCurve(address market) {
-        if (!whitelistRegistry.isAuthorizedHookFor(market, msg.sender)) revert Unauthorized();
+    modifier onlyBondingCurve(address market) {
+        if (!whitelistRegistry.isAuthorizedBondingCurve(market, msg.sender)) revert Unauthorized();
         _;
     }
 
@@ -62,15 +66,15 @@ contract FeeRouter is Initializable, ReentrancyGuard {
     //  Initialization
     // ------------------------------------------
 
-    constructor() { _disableInitializers(); }
-
-    function initialize(
+    constructor(
+        address[] memory recipients_,
+        uint16[] memory recipientsBps_,
         address rewardsTreasury_,
         address orchestratorProxy_,
         address whitelistRegistry_,
         address airlock_,
         address swapRouter_
-    ) external initializer {
+    ) { 
         if (
             rewardsTreasury_ == address(0) || 
             orchestratorProxy_ == address(0) || 
@@ -84,24 +88,24 @@ contract FeeRouter is Initializable, ReentrancyGuard {
         whitelistRegistry = IWhitelistRegistry(whitelistRegistry_);
         airlock = airlock_;
         swapRouter = swapRouter_;
-    }
 
-    receive() external payable {
-        emit FeesReceived(msg.sender, msg.value);
-    }
+        _setRecipients(recipients_, recipientsBps_);
+     }
+
+    receive() external payable {}
 
     // ------------------------------------------
-    //  Bonding Fee Management
+    //  Bonding Fee Routing
     // ------------------------------------------
 
     /// @notice Payable path used by Doppler to forward bonding ETH and auto-route 89% to rewards
-    function forwardBondingFee(address market) external payable onlyAuthorizedBondingCurve(market) nonReentrant {
+    function forwardBondingFee(address market) external payable onlyBondingCurve(market) nonReentrant {
         uint256 amount = msg.value;
 
         uint256 forward = (amount * PBR_BPS) / BPS;
         if (forward > 0) {
             (bool ok, ) = payable(rewardsTreasury).call{ value: forward }("");
-            require(ok, "FWD_FAIL");
+            if (!ok) emit ForwardingFailed(rewardsTreasury, address(0), forward);
         }
     }
 
@@ -111,11 +115,10 @@ contract FeeRouter is Initializable, ReentrancyGuard {
         address token,        // ERC20 held by FeeRouter
         uint256 deadline
     ) external onlyAirlock nonReentrant {
-        require(token != address(0), "ZERO_TOKEN");
-        require(swapRouter != address(0), "ZERO_ROUTER");
+        if (token == address(0)) revert ZeroAddress();
 
         uint256 amountIn = IERC20(token).balanceOf(address(this));
-        require(amountIn > 0, "NO_BALANCE");
+        if (amountIn == 0) return;
 
         // Approve router if needed
         if (IERC20(token).allowance(address(this), swapRouter) < amountIn) {
@@ -139,31 +142,36 @@ contract FeeRouter is Initializable, ReentrancyGuard {
             uint256 forward = (ethOut * PBR_BPS) / BPS;
             if (forward > 0) {
                 (bool sent, ) = payable(rewardsTreasury).call{ value: forward }("");
-                require(sent, "FWD_FAIL");
+                if (!sent) emit ForwardingFailed(rewardsTreasury, address(0), forward);
             }
         }
     }
 
     // ------------------------------------------
-    //  Fee Distribution
+    //  Standard Fee Distribution
     // ------------------------------------------
 
-    function distribute(uint256 amount) external nonReentrant {
+    function distribute(uint256 amount) external onlyOrchestrator nonReentrant {
         uint256 bal = address(this).balance;
         uint256 toDistribute = amount == 0 ? bal : amount;
-        require(toDistribute <= bal, "INSUFFICIENT_BAL");
+        if (toDistribute > bal) revert InsufficientBalance(amount, bal);
 
         uint256 n = recipients.length;
-        require(n > 0, "NO_RECIPIENTS");
+        if (n == 0) revert NoRecipients();
 
         uint256 sent;
         for (uint256 i; i < n; ++i) {
-            uint256 share = (toDistribute * recipientsBps[i]) / BPS;
+            address to = recipients[i];
+            uint256 bps = recipientsBps[i];
+
+            uint256 share = (toDistribute * bps) / BPS;
             sent += share;
             if (i == n - 1) share = toDistribute - (sent - share);
-            (bool ok, ) = recipients[i].call{ value: share }("");
-            require(ok, "TRANSFER_FAIL");
+            (bool ok, ) = to.call{ value: share }("");
+
+            if (!ok) revert TransferFailed(to, share);
         }
+        
         emit Distributed(toDistribute, n);
     }
 
@@ -171,22 +179,24 @@ contract FeeRouter is Initializable, ReentrancyGuard {
     //  Upkeep
     // ------------------------------------------
 
-    function _setRecipients(address[] calldata newRecipients, uint16[] calldata newBps) internal {
-        require(newRecipients.length == newBps.length, "LEN_MISMATCH");
-        require(newRecipients.length > 0, "EMPTY");
-        uint256 sum;
-        for (uint256 i; i < newRecipients.length; ++i) {
-            require(newRecipients[i] != address(0), "ZERO_RECIPIENT");
-            sum += newBps[i];
-        }
-        require(sum == BPS, "BPS_SUM");
-        recipients = newRecipients;
-        recipientsBps = newBps;
-        emit RecipientsUpdated(newRecipients, newBps);
-    }
-
     function updateRecipients(address[] calldata newRecipients, uint16[] calldata newBps) external onlyOrchestrator { 
         _setRecipients(newRecipients, newBps); 
+    }
+
+    function _setRecipients(address[] memory newRecipients, uint16[] memory newBps) internal {
+        if (newRecipients.length != newBps.length || newRecipients.length == 0) revert BadParams();
+
+        uint256 sum;
+        for (uint256 i; i < newRecipients.length; ++i) {
+            if (newRecipients[i] == address(0)) revert ZeroAddress();
+            sum += newBps[i];
+        }
+        if (sum != BPS) revert Bps();
+
+        recipients = newRecipients;
+        recipientsBps = newBps;
+
+        emit RecipientsUpdated(newRecipients, newBps);
     }
 
     // ------------------------------------------
@@ -194,10 +204,10 @@ contract FeeRouter is Initializable, ReentrancyGuard {
     // ------------------------------------------
 
     function rescue(address to, uint256 amount) external onlyOrchestrator nonReentrant {
-        require(to != address(0), "ZERO_TO");
+        if (to == address(0)) revert ZeroAddress();
 
         (bool ok, ) = to.call{ value: amount }("");
-        require(ok, "RESCUE_FAIL");
+        if (!ok) revert TransferFailed(to, amount);
 
         emit Rescue(to, amount, address(0));
     }
