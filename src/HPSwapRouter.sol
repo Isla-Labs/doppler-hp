@@ -155,6 +155,7 @@ contract HPSwapRouter is ReentrancyGuard {
     /// @notice Enables updateable eth/usdc pool parameters
     function rebindEthUsdc(bytes32 newPoolId) external onlyOrchestrator {
         if (newPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
+        if (newPoolId == ethUsdcPoolId) return;
 
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
             IPositionManager(positionManager).poolKeys(newPoolId);
@@ -166,8 +167,6 @@ contract HPSwapRouter is ReentrancyGuard {
         }
 
         bytes32 oldId = ethUsdcPoolId;
-        uint24 oldFee = ethUsdcFee;
-        int24 oldSpacing = ethUsdcTickSpacing;
 
         ethUsdcBase = c0a;
         ethUsdcFee = fee;
