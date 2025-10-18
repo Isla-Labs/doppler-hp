@@ -11,6 +11,8 @@ import { ILiquidityMigrator } from "src/interfaces/ILiquidityMigrator.sol";
 import { IWhitelistRegistryAdmin } from "src/interfaces/IWhitelistRegistry.sol";
 import { DERC20 } from "src/DERC20.sol";
 
+interface IFeeRouter { function convertBondingFee(address token) external; }
+
 enum ModuleState {
     NotWhitelisted,
     TokenFactory,
@@ -24,8 +26,6 @@ error WrongModuleState(address module, ModuleState expected, ModuleState actual)
 
 /// @notice Thrown when the lengths of two arrays do not match
 error ArrayLengthsMismatch();
-
-interface IFeeRouter { function convertBondingFee(address token) external; }
 
 /**
  * @notice Data related to the asset token
