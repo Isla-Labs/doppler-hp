@@ -137,7 +137,7 @@ contract FeeRouter is ReentrancyGuard {
         uint256 amountIn = IERC20(token).balanceOf(address(this));
         if (amountIn == 0) return;
 
-        // Approve router if needed
+        // Approve router
         if (IERC20(token).allowance(address(this), swapRouter) < amountIn) {
             // approve(0)
             (bool ok0, bytes memory ret0) =
