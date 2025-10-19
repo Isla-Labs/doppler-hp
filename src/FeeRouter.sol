@@ -252,7 +252,7 @@ contract FeeRouter is ReentrancyGuard {
     //  Recovery
     // ------------------------------------------
 
-    /// @notice Re-run auto-conversion (admin-only) with hard checks
+    /// @notice Re-run auto-conversion in the event of Airlock.migrate() non-blocking failure
     /// @dev Ensures token is an active and migrated playerToken and balance > 0
     function rerunConvert(address token) external onlyOrchestrator nonReentrant {
         if (!whitelistRegistry.isMarketActive(token)) revert InactiveMarket(token);
