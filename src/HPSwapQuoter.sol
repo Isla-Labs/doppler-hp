@@ -7,8 +7,9 @@ import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
-import { IV4Quoter, MultiHopContext, IPositionManager } from "src/interfaces/IUtilities.sol";
+import { IV4Quoter, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
+import { MultiHopContext } from "src/stores/MultiHopContext.sol";
 
 /// @notice return schema for successful quote
 struct QuoteResult {

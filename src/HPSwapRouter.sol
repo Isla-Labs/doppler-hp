@@ -9,8 +9,9 @@ import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
-import { IWETH, IPermit2, MultiHopContext, IPositionManager } from "src/interfaces/IUtilities.sol";
+import { IWETH, IPermit2, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
+import { MultiHopContext } from "src/stores/MultiHopContext.sol";
 
 /// @notice return schema for successful swap
 struct SwapResult {
