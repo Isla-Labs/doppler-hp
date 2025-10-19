@@ -154,8 +154,16 @@ contract HPSwapRouter is ReentrancyGuard {
         }
     }
 
-    receive() external payable { revert("DIRECT_ETH_DISABLED"); }
-	fallback() external payable { revert("DIRECT_ETH_DISABLED"); }
+    receive() external payable {
+        // Allow ETH sent by PoolManager.settle()/take(...) and by WETH9.withdraw(...)
+        if (msg.sender != address(poolManager) && msg.sender != WETH) {
+            revert("DIRECT_ETH_DISABLED");
+        }
+    }
+
+    fallback() external payable {
+        revert("DIRECT_ETH_DISABLED");
+    }
 
     // ------------------------------------------
     //  Upkeep
