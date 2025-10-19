@@ -10,6 +10,7 @@ import { PoolId, PoolIdLibrary } from "@v4-core/types/PoolId.sol";
 import { BeforeSwapDelta, toBeforeSwapDelta } from "@v4-core/types/BeforeSwapDelta.sol";
 import { BalanceDelta } from "@v4-core/types/BalanceDelta.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
+import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { SD59x18, exp, sd } from "@prb/math/src/SD59x18.sol";
 import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
@@ -22,6 +23,7 @@ import { MultiHopContext } from "src/stores/MultiHopContext.sol";
  */
 contract UniswapV4MigratorHook is BaseHook {
     using PoolIdLibrary for PoolKey;
+    using SafeCastLib for uint256;
 
     /// @notice Address of the Uniswap V4 Migrator contract
     address public immutable migrator;
@@ -167,9 +169,6 @@ contract UniswapV4MigratorHook is BaseHook {
                 // Calculate fee amount in ETH
                 uint256 totalFeeAmount = (inputAmount * dynamicFeeBps) / BPS;
 
-                // Ensure compatibility with int128 delta
-                require(totalFeeAmount <= type(uint128).max, "fee overflow");
-
                 // Split fees 89:11 for PBR
                 uint256 rewardsAmount = (totalFeeAmount * PBR_BPS) / BPS;
                 uint256 feeAmount = totalFeeAmount - rewardsAmount;
@@ -179,7 +178,7 @@ contract UniswapV4MigratorHook is BaseHook {
                 poolManager.take(key.currency0, feeRouter, feeAmount);
                 
                 // Return delta to account for fees taken
-                BeforeSwapDelta delta = toBeforeSwapDelta(int128(int256(totalFeeAmount)), 0);
+                BeforeSwapDelta delta = toBeforeSwapDelta(totalFeeAmount.toInt128(), 0);
                 
                 return (BaseHook.beforeSwap.selector, delta, 0);
             }
@@ -227,9 +226,6 @@ contract UniswapV4MigratorHook is BaseHook {
                 // Calculate fee amount in ETH
                 uint256 totalFeeAmount = (outputAmount * dynamicFeeBps) / BPS;
 
-                // Ensure compatibility with int128 delta
-                require(totalFeeAmount <= type(uint128).max, "fee overflow");
-
                 // Split fees 89:11 for PBR
                 uint256 rewardsAmount = (totalFeeAmount * PBR_BPS) / BPS;
                 uint256 feeAmount = totalFeeAmount - rewardsAmount;
@@ -239,7 +235,7 @@ contract UniswapV4MigratorHook is BaseHook {
                 poolManager.take(key.currency0, feeRouter, feeAmount);
 
                 // Return delta to account for fees taken
-                return (BaseHook.afterSwap.selector, int128(int256(totalFeeAmount)));
+                return (BaseHook.afterSwap.selector, totalFeeAmount.toInt128());
             }
         }
         

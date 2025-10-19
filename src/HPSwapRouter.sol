@@ -8,6 +8,7 @@ import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
+import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
 import { IWETH, IPermit2, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
@@ -38,6 +39,7 @@ struct SwapCtx {
  */
 contract HPSwapRouter is ReentrancyGuard {
     using SafeERC20 for IERC20;
+    using SafeCastLib for uint256;
     
     // Core dependencies
     IPoolManager public immutable poolManager;
@@ -449,7 +451,7 @@ contract HPSwapRouter is ReentrancyGuard {
     ) internal {
         IPoolManager.SwapParams memory p = IPoolManager.SwapParams({
             zeroForOne: zeroForOne,
-            amountSpecified: int256(amountIn),
+            amountSpecified: amountIn.toInt256(),
             sqrtPriceLimitX96: zeroForOne ? (type(uint160).min + 1) : (type(uint160).max - 1)
         });
         poolManager.swap(key, p, hookData);
@@ -485,9 +487,12 @@ contract HPSwapRouter is ReentrancyGuard {
     /// @notice Prefer Permit2 if allowance exists; fall back to ERC20.transferFrom
     function _pullFrom(address from, address token, uint256 amount) internal {
         (uint160 p2Amt, uint48 p2Exp, ) = IPermit2(PERMIT2).allowance(from, token, address(this));
-        bool ok = p2Amt >= uint160(amount) && (p2Exp == 0 || p2Exp >= block.timestamp);
+        
+        uint160 amt160 = amount.toUint160();
+        bool ok = p2Amt >= amt160 && (p2Exp == 0 || p2Exp >= block.timestamp);
+
         if (ok) {
-            IPermit2(PERMIT2).transferFrom(from, address(this), uint160(amount), token);
+            IPermit2(PERMIT2).transferFrom(from, address(this), amt160, token);
         } else {
             IERC20(token).safeTransferFrom(from, address(this), amount);
         }
