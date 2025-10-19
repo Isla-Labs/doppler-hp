@@ -41,9 +41,15 @@ contract FeeRouter is ReentrancyGuard {
     error Unauthorized();
     error InsufficientBalance(uint256 request, uint256 balance);
     error NoRecipients();
-    error TransferFailed();
+    error TransferFailed(address to, uint256 amt);
     error BadParams();
     error Bps();
+    error InactiveMarket(address token);
+    error NotMigrated(address token);
+    error NoBalance(address token);
+    error ApproveError(address token, address spender, uint256 amount);
+    error SwapError(address tokenIn, address tokenOut, uint256 amountIn);
+    error ForwardingError(address to, address asset, uint256 amount);
 
     // ------------------------------------------
     //  Access Control
@@ -105,6 +111,7 @@ contract FeeRouter is ReentrancyGuard {
     function forwardBondingFee(address market) external payable onlyBondingCurve(market) nonReentrant {
         uint256 amount = msg.value;
 
+        // Non-blocking for Doppler
         uint256 forward = (amount * PBR_BPS) / BPS;
         if (forward > 0) {
             (bool ok, ) = payable(rewardsTreasury).call{ value: forward }("");
@@ -120,6 +127,13 @@ contract FeeRouter is ReentrancyGuard {
         // Hard-fail on bad input
         if (token == address(0)) revert ZeroAddress();
 
+        // Non-blocking for Airlock
+        _convertBondingFee(token, false);
+    }
+
+    /// @dev Shared implementation for conversion
+    /// @dev strict=true reverts on failures, strict=false emits and returns
+    function _convertBondingFee(address token, bool strict) internal {
         uint256 amountIn = IERC20(token).balanceOf(address(this));
         if (amountIn == 0) return;
 
@@ -129,6 +143,7 @@ contract FeeRouter is ReentrancyGuard {
             (bool ok0, bytes memory ret0) =
                 token.call(abi.encodeWithSelector(IERC20.approve.selector, swapRouter, 0));
             if (!ok0 || (ret0.length != 0 && !abi.decode(ret0, (bool)))) {
+                if (strict) revert ApproveError(token, swapRouter, 0);
                 emit ApproveFailed(token, swapRouter, 0);
                 return;
             }
@@ -137,6 +152,7 @@ contract FeeRouter is ReentrancyGuard {
             (bool ok1, bytes memory ret1) =
                 token.call(abi.encodeWithSelector(IERC20.approve.selector, swapRouter, amountIn));
             if (!ok1 || (ret1.length != 0 && !abi.decode(ret1, (bool)))) {
+                if (strict) revert ApproveError(token, swapRouter, amountIn);
                 emit ApproveFailed(token, swapRouter, amountIn);
                 return;
             }
@@ -153,18 +169,21 @@ contract FeeRouter is ReentrancyGuard {
         ) returns (IHPSwapRouter.SwapResult memory _sr) {
             sr = _sr;
         } catch {
+            if (strict) revert SwapError(token, address(0), amountIn);
             emit SwapFailed(token, address(0), amountIn);
             return;
         }
 
         uint256 ethOut = sr.amountOut;
-
         if (ethOut > 0) {
             // forward 89% to rewards
             uint256 forward = (ethOut * PBR_BPS) / BPS;
             if (forward > 0) {
                 (bool sent, ) = payable(rewardsTreasury).call{ value: forward }("");
-                if (!sent) emit ForwardingFailed(rewardsTreasury, address(0), forward);
+                if (!sent) {
+                    if (strict) revert ForwardingError(rewardsTreasury, address(0), forward);
+                    emit ForwardingFailed(rewardsTreasury, address(0), forward);
+                }
             }
         }
     }
@@ -197,9 +216,9 @@ contract FeeRouter is ReentrancyGuard {
             if (i == n - 1) share = toDistribute - (sent - share);
             (bool ok, ) = to.call{ value: share }("");
 
-            if (!ok) revert TransferFailed();
+            if (!ok) revert TransferFailed(to, share);
         }
-        
+
         emit Distributed(toDistribute, n);
     }
 
@@ -233,9 +252,25 @@ contract FeeRouter is ReentrancyGuard {
     //  Recovery
     // ------------------------------------------
 
-    /// @notice Can recover failed playerToken redistribution without blocking Airlock
-    function rescueToken(address token, address to, uint256 amount) external onlyOrchestrator nonReentrant {
-        if (to == address(0) || token == address(0)) revert ZeroAddress();
+    /// @notice Re-run auto-conversion (admin-only) with hard checks
+    /// @dev Ensures token is an active and migrated playerToken and balance > 0
+    function rerunConvert(address token) external onlyOrchestrator nonReentrant {
+        if (!whitelistRegistry.isMarketActive(token)) revert InactiveMarket(token);
+
+        if (!whitelistRegistry.hasMigrated(token)) revert NotMigrated(token);
+        if (IERC20(token).balanceOf(address(this)) == 0) revert NoBalance(token);
+
+        _convertBondingFee(token, true);
+    }
+
+    /// @notice Can recover stray ERC20 balances (non playerToken)
+    function rescueErc20(address token, address to, uint256 amount) external onlyOrchestrator nonReentrant {
+        if (to == address(0)) revert ZeroAddress();
+        if (whitelistRegistry.isMarketActive(token)) revert Unauthorized();
+
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        if (bal == 0) revert NoBalance(token);
+        if (amount > bal) revert InsufficientBalance(amount, bal);
 
         IERC20(token).safeTransfer(to, amount);
         emit Recovered(to, amount, token);
