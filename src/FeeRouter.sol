@@ -25,6 +25,7 @@ contract FeeRouter is ReentrancyGuard {
 
     uint256 public constant BPS = 10_000;
     uint256 public constant PBR_BPS = 8900;
+    uint256 public constant MIN_DISTRIBUTE_BPS = 1000;
 
     // ------------------------------------------
     //  Events/Errors
@@ -197,11 +198,17 @@ contract FeeRouter is ReentrancyGuard {
      * @notice Enables recipients to sweep feeRouter for remaining 11% split
      * @dev Bonding fees are ephemeral for currency0 so remaining ETH balance should be absolute;
      *      playerToken balances are automatically swept during migration
-     * @param amount Total ETH to distribute in wei
+     * @param amount Total ETH to distribute in wei (amount=0 for full balance)
      */
     function distribute(uint256 amount) external onlyOrchestrator nonReentrant {
         uint256 bal = address(this).balance;
         uint256 toDistribute = amount == 0 ? bal : amount;
+
+        uint256 minAmt = (bal * MIN_DISTRIBUTE_BPS) / BPS;
+        if (toDistribute != 0 && toDistribute < minAmt) {
+            toDistribute = minAmt;
+        }
+
         if (toDistribute > bal) revert InsufficientBalance(amount, bal);
 
         uint256 n = recipients.length;
@@ -280,6 +287,14 @@ contract FeeRouter is ReentrancyGuard {
     //  View
     // ------------------------------------------
 
-    /// @notice Count recipients
-    function recipientsLength() external view returns (uint256) { return recipients.length; }
+    /// @notice Get ETH balance
+    function ethBalance() external view returns (uint256) {
+        return address(this).balance;
+    }
+
+    /// @notice Get recipients
+    function recipientsConfig() external view returns (address[] memory addrs, uint16[] memory bps) {
+        addrs = recipients;
+        bps = recipientsBps;
+    }
 }
