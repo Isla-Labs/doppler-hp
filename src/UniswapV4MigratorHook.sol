@@ -40,7 +40,7 @@ contract UniswapV4MigratorHook is BaseHook {
     /// @notice Proxy address of the RewardsTreasury contract for PBR distribution
     address public immutable rewardsTreasury;
 
-    /// @notice Proxy address of the FeeRouter contract
+    /// @notice Address of the FeeRouter contract
     address public immutable feeRouter;
 
     // ------------------------------------------
