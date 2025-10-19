@@ -31,11 +31,11 @@ contract FeeRouter is ReentrancyGuard {
     // ------------------------------------------
 
     event RecipientsUpdated(address[] recipients, uint16[] bps);
-    event ForwardingFailed(address indexed to, address asset, uint256 amount);
     event Distributed(uint256 amount, uint256 nRecipients);
     event Recovered(address indexed to, uint256 amount, address token);
     event ApproveFailed(address indexed token, address indexed spender, uint256 amount);
     event SwapFailed(address indexed tokenIn, address indexed tokenOut, uint256 amountIn);
+    event ForwardingFailed(address indexed to, address asset, uint256 amount);
 
     error ZeroAddress();
     error Unauthorized();
