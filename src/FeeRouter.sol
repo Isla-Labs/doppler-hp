@@ -31,7 +31,7 @@ contract FeeRouter is ReentrancyGuard {
     // ------------------------------------------
 
     event RecipientsUpdated(address[] recipients, uint16[] bps);
-    event Distributed(uint256 amount, uint256 nRecipients);
+    event FeesDistributed(uint256 amount, uint256 nRecipients);
     event Recovered(address indexed to, uint256 amount, address token);
     event ApproveFailed(address indexed token, address indexed spender, uint256 amount);
     event SwapFailed(address indexed tokenIn, address indexed tokenOut, uint256 amountIn);
@@ -220,7 +220,7 @@ contract FeeRouter is ReentrancyGuard {
             if (!ok) revert TransferFailed(to, share);
         }
 
-        emit Distributed(toDistribute, n);
+        emit FeesDistributed(toDistribute, n);
     }
 
     // ------------------------------------------
