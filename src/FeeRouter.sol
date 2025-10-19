@@ -174,6 +174,7 @@ contract FeeRouter is ReentrancyGuard {
             return;
         }
 
+        // split and relay to rewardsTreasury
         uint256 ethOut = sr.amountOut;
         if (ethOut > 0) {
             // forward 89% to rewards
