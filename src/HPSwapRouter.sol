@@ -155,7 +155,6 @@ contract HPSwapRouter is ReentrancyGuard {
     }
 
     receive() external payable {
-        // Block stray deposits; allow PoolManager and WETH9
         if (msg.sender != address(poolManager) && msg.sender != WETH) {
             revert("DIRECT_ETH_DISABLED");
         }
