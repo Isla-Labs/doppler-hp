@@ -144,7 +144,7 @@ contract UniswapV4MigratorHook is BaseHook {
         return BaseHook.beforeInitialize.selector;
     }
 
-    /// @notice Hook that runs before swap (when buying a Player Token)
+    /// @notice Hook that runs before swap
     function _beforeSwap(
         address sender,
         PoolKey calldata key,
@@ -300,11 +300,12 @@ contract UniswapV4MigratorHook is BaseHook {
     // ------------------------------------------
 
     /// @notice Decode hookData into MultiHopContext
-    /// @param hookData Encoded multi-hop context data
+    /// @dev Avoids double fee collection on playerToken <> playerToken swaps
+    /// @param hookData Encoded multi-hop context
     /// @return context Decoded multi-hop context
     function _decodeHookData(bytes calldata hookData) private pure returns (MultiHopContext memory context) {
         if (hookData.length == 0) {
-            return MultiHopContext(false, false); // Single hop default
+            return MultiHopContext(false, false);
         }
         return abi.decode(hookData, (MultiHopContext));
     }
@@ -337,7 +338,7 @@ contract UniswapV4MigratorHook is BaseHook {
     //  Hook Permissions
     // ------------------------------------------
 
-    /// @notice Returns the hook permissions configuration
+    /// @notice Returns the hook permissions config
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true,
