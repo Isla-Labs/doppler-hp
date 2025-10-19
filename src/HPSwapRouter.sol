@@ -146,6 +146,7 @@ contract HPSwapRouter is ReentrancyGuard {
             ethUsdcFee = fee;
             ethUsdcTickSpacing = spacing;
             ethUsdcPoolId = _ethUsdcPoolId;
+            
         } else {
             ethUsdcBase = address(0);
             ethUsdcFee = 0;
