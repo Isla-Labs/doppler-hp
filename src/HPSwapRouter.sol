@@ -21,16 +21,6 @@ struct SwapResult {
     uint256 totalFeesEth;   // all fees, ETH-denominated (wei)
 }
 
-/// @notice Swap context to pass into unlock
-struct SwapCtx {
-    address caller;
-    address inputToken;
-    address outputToken;
-    uint256 amountIn;
-    uint256 minOut;
-    uint256 ethAttached;
-}
-
 /**
  * @title HP Swap Router
  * @dev Swap API with automatic pool detection, fee reduction for multihops, and UR-style hardening
@@ -96,6 +86,11 @@ contract HPSwapRouter is ReentrancyGuard {
 
     modifier onlyOrchestrator() {
         if (msg.sender != orchestratorProxy) revert Unauthorized();
+        _;
+    }
+
+    modifier onlyPoolManager() {
+        if (msg.sender != address(poolManager)) revert Unauthorized();
         _;
     }
 
@@ -199,6 +194,16 @@ contract HPSwapRouter is ReentrancyGuard {
     //  Entry Point
     // ------------------------------------------
 
+    /// @notice Swap context to pass into unlock
+    struct SwapCtx {
+        address caller;
+        address inputToken;
+        address outputToken;
+        uint256 amountIn;
+        uint256 minOut;
+        uint256 ethAttached;
+    }
+
     /**
      * @notice Swap entry point for exact in single
      * @dev (ETH <> playerToken), (USDC <> playerToken), (playerToken <> playerToken)
@@ -237,8 +242,7 @@ contract HPSwapRouter is ReentrancyGuard {
      * @param data ABI-encoded SwapCtx { caller, inputToken, outputToken, amountIn, minOut, ethAttached }
      * @return result ABI-encoded SwapResult { amountOut, totalGas, totalFeesEth }
      */
-    function unlockCallback(bytes calldata data) external payable returns (bytes memory result) {
-        if (msg.sender != address(poolManager)) revert Unauthorized();
+    function unlockCallback(bytes calldata data) external payable onlyPoolManager returns (bytes memory result) {
         SwapCtx memory ctx = abi.decode(data, (SwapCtx));
 
         address inputToken = ctx.inputToken;
