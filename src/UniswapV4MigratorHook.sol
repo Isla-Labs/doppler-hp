@@ -250,7 +250,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         }
     }
 
-    /// @notice Uses trusted forwarder pattern to place limit orders with ETH as currency0
+    /// @notice Uses trusted forwarder pattern to place !zeroForOne limit orders
     function placeOrder(
         PoolKey calldata key,
         int24 tick,
@@ -261,6 +261,38 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         if (sender == address(0) || sender == limitRouter) revert NeedsUser();
 
         _placeOrder(key, tick, zeroForOne, liquidity, sender);
+    }
+
+    /// @notice Uses trusted forwarder pattern to place zeroForOne limit orders (ETH as currency0) with pre-computed headroom
+    function placeOrderEth(
+        PoolKey calldata key,
+        int24 tick,
+        bool zeroForOne,
+        uint128 liquidity
+    ) external payable onlyLimitRouter {
+        // Resolve end-user
+        address sender = _msgSenderEx();
+        if (sender == address(0) || sender == limitRouter) revert NeedsUser();
+
+        // Budget is the ETH forwarded by the router in this call (already incorporates headroom)
+        uint256 budget = msg.value;
+
+        // Measure hook balance before placement; OZ callback will consume principal from hook
+        uint256 balBefore = address(this).balance;
+
+        // Computes principal from liquidity and deducts from hook balance
+        _placeOrder(key, tick, zeroForOne, liquidity, sender);
+
+        // Measure consumption
+        uint256 balAfter = address(this).balance;
+        uint256 spent = balBefore > balAfter ? balBefore - balAfter : 0;
+        uint256 refund = budget > spent ? budget - spent : 0;
+
+        // Refund any surplus back to the user via router
+        if (refund > 0) {
+            (bool ok, ) = payable(msg.sender).call{ value: refund }("");
+            require(ok, "REFUND_FAIL");
+        }
     }
 
     /// @notice Uses trusted forwarder pattern to cancel limit orders with user as owner
