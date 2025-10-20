@@ -101,7 +101,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         IWhitelistRegistry _whitelistRegistry,
         address _swapQuoter,
         address _swapRouter,
-        address _limitRouter,
+        address _limitRouterProxy,
         address _rewardsTreasury,
         address _feeRouter
     ) BaseHook(manager) { // BaseHook is an ancestor of LimitOrderHook
@@ -110,7 +110,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
             address(_whitelistRegistry) == address(0) || 
             _swapQuoter == address(0) || 
             _swapRouter == address(0) || 
-            _limitRouter == address(0) || 
+            _limitRouterProxy == address(0) || 
             _rewardsTreasury == address(0) || 
             _feeRouter == address(0)
         ) revert ZeroAddress();
@@ -119,7 +119,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         whitelistRegistry = _whitelistRegistry;
         swapQuoter = _swapQuoter;
         swapRouter = _swapRouter;
-        limitRouter = _limitRouter;
+        limitRouter = _limitRouterProxy;
         rewardsTreasury = _rewardsTreasury;
         feeRouter = _feeRouter;
     }
