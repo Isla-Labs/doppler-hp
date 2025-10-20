@@ -183,12 +183,12 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         BalanceDelta delta,
         bytes calldata hookData
     ) internal override returns (bytes4, int128) {
+        // Run limit-order fills
+        super._afterSwap(sender, key, swapParams, delta, hookData);
+
         // Emit swap event
         (uint160 sqrtPriceX96,,,) = poolManager().getSlot0(key.toId());
         emit Swap(Currency.unwrap(key.currency1), sqrtPriceX96);
-
-        // Run limit-order fills
-        super._afterSwap(sender, key, swapParams, delta, hookData);
 
         // Dynamic fee on sells (playerToken -> ETH)
         if (!swapParams.zeroForOne) {
@@ -277,7 +277,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         // Convert to signed fixed-point and compute e^(-x/1000)
         SD59x18 negativeX = sd(-int256(x)) / sd(1000);
         SD59x18 result = exp(negativeX);
-        
+
         return uint256(result.unwrap()); // 1e18-scaled
     }
 
