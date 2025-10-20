@@ -127,15 +127,6 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         feeRouter = _feeRouter;
     }
 
-    // When called by HPLimitRouter, reads the appended 20 bytes to build sender
-    function _msgSenderEx() internal view returns (address sender) {
-        if (msg.sender == limitRouter) {
-            assembly { sender := shr(96, calldataload(sub(calldatasize(), 20))) }
-        } else {
-            sender = msg.sender;
-        }
-    }
-
     // For buy-side ETH limit orders (onlyLimitRouter)
     receive() external payable {
         if (msg.sender != limitRouter) revert DepositsDisabled();
@@ -250,6 +241,16 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     //  Limit Order Access
     // ------------------------------------------
 
+    /// @notice Reads the appended 20 bytes from HPLimitRouter to replace msg.sender with owner address
+    function _msgSenderEx() internal view returns (address sender) {
+        if (msg.sender == limitRouter) {
+            assembly { sender := shr(96, calldataload(sub(calldatasize(), 20))) }
+        } else {
+            sender = msg.sender;
+        }
+    }
+
+    /// @notice Uses trusted forwarder pattern to place limit orders with ETH as currency0
     function placeOrder(
         PoolKey calldata key,
         int24 tick,
@@ -262,6 +263,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         _placeOrder(key, tick, zeroForOne, liquidity, sender);
     }
 
+    /// @notice Uses trusted forwarder pattern to cancel limit orders with user as owner
     function cancelOrder(
         PoolKey calldata key,
         int24 tickLower,
@@ -274,6 +276,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         _cancelOrder(key, tickLower, zeroForOne, to, sender);
     }
 
+    /// @notice Uses trusted forwarder pattern to withdraw limit orders with post-execution dynamic fees
     function withdraw(
         OrderIdLibrary.OrderId orderId,
         address to
