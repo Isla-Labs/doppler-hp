@@ -195,7 +195,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
             // Decode multi-hop context
             MultiHopContext memory context = _decodeHookData(hookData);
 
-            // Skip fee: (via Router/Quoter: first-hop playerToken <> playerToken) or market inactive
+            // Check market status and skip fee on playerToken <> playerToken swaps (via Router/Quoter)
             if (
                 ((sender == swapRouter || sender == swapQuoter) && context.isMultiHop && !context.isUsdc) ||
                 (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1)))
@@ -210,6 +210,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
                 : uint256(uint128(delta.amount0()));
             uint256 dynamicFeeBps = _calculateDynamicFee(outputAmount, ethPriceUsd);
 
+            // Re-route and update delta
             if (dynamicFeeBps > 0) {
                 uint256 totalFeeAmount = (outputAmount * dynamicFeeBps) / BPS;
                 uint256 rewardsAmount = (totalFeeAmount * PBR_BPS) / BPS;
