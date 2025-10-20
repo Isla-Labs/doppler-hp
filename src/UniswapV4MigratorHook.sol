@@ -97,16 +97,6 @@ contract UniswapV4MigratorHook is BaseHook {
     //  Initialization
     // ------------------------------------------
 
-    /**
-     * @notice Constructor for the Uniswap V4 Migrator Hook
-     * @param manager Address of the Uniswap V4 Pool Manager
-     * @param _migrator Address of the Uniswap V4 Migrator contract
-     * @param _whitelistRegistry Address of the Whitelist Registry contract
-     * @param _swapQuoter Address of the HP Swap Quoter contract
-     * @param _swapRouter Address of the HP Swap Router contract
-     * @param _rewardsTreasury Proxy address of the RewardsTreasury contract
-     * @param _feeRouter Proxy address of the FeeRouter contract
-     */
     constructor(
         IPoolManager manager, 
         UniswapV4Migrator _migrator,
