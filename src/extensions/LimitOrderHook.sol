@@ -243,6 +243,7 @@ contract LimitOrderHook is BaseHook, IUnlockCallback {
      * via the `unlock` function, which will trigger the `{unlockCallback}` function.
      */
     function placeOrder(PoolKey calldata key, int24 tick, bool zeroForOne, uint128 liquidity) public virtual {
+        // Overridden by UniswapV4MigratorHook
         _placeOrder(key, tick, zeroForOne, liquidity, msg.sender);
     }
 
@@ -331,6 +332,7 @@ contract LimitOrderHook is BaseHook, IUnlockCallback {
      * The interaction with the `poolManager` is done via the `unlock` function, which will trigger the `{unlockCallback}` function.
      */
     function cancelOrder(PoolKey calldata key, int24 tickLower, bool zeroForOne, address to) public virtual {
+        // Overridden by UniswapV4MigratorHook
         _cancelOrder(key, tickLower, zeroForOne, to, msg.sender);
     }
 
@@ -407,6 +409,7 @@ contract LimitOrderHook is BaseHook, IUnlockCallback {
      * `unlock` function, which will trigger the `{unlockCallback}` function.
      */
     function withdraw(OrderIdLibrary.OrderId orderId, address to) public virtual returns (uint256 amount0, uint256 amount1) {
+        // Overridden by UniswapV4MigratorHook
         return _withdraw(orderId, to, msg.sender);
     }
 
