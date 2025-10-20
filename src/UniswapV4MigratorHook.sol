@@ -277,6 +277,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         // Convert to signed fixed-point and compute e^(-x/1000)
         SD59x18 negativeX = sd(-int256(x)) / sd(1000);
         SD59x18 result = exp(negativeX);
+        
         return uint256(result.unwrap()); // 1e18-scaled
     }
 
