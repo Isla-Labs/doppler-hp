@@ -19,7 +19,7 @@ import {MultiHopContext} from "src/stores/MultiHopContext.sol";
 
 /**
  * @title Uniswap V4 Migrator Hook with Dynamic Fees and Limit Order Support
- * @dev Extends OpenZeppelin's LimitOrderHook (https://github.com/OpenZeppelin/uniswap-hooks/blob/master/src/general/LimitOrderHook.sol)
+ * @dev Extends OpenZeppelin's LimitOrderHook (https://github.com/OpenZeppelin/uniswap-hooks/blob/14be1504717139e10be4ec9c9ec95f5ffe8fba33/src/general/LimitOrderHook.sol)
  * @author Whetstone Research, Isla Labs
  * @custom:security-contact security@islalabs.co
  */
