@@ -1,46 +1,38 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.26;
 
-import { BaseHook } from "@v4-periphery/utils/BaseHook.sol";
+import { LimitOrderHook, OrderIdLibrary } from "src/extensions/LimitOrderHook.sol";
 import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
-import { AggregatorV3Interface } from "src/interfaces/AggregatorV3Interface.sol";
 import { Hooks } from "@v4-core/libraries/Hooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@v4-core/types/PoolId.sol";
-import { BeforeSwapDelta, toBeforeSwapDelta } from "@v4-core/types/BeforeSwapDelta.sol";
 import { BalanceDelta } from "@v4-core/types/BalanceDelta.sol";
+import { BeforeSwapDelta, toBeforeSwapDelta } from "@v4-core/types/BeforeSwapDelta.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
+import { SwapParams } from "@v4-core/types/PoolOperation.sol";
 import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { SD59x18, exp, sd } from "@prb/math/src/SD59x18.sol";
 import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
+import { AggregatorV3Interface } from "src/interfaces/AggregatorV3Interface.sol";
 import { MultiHopContext } from "src/stores/MultiHopContext.sol";
 
 /**
- * @title Uniswap V4 Migrator Hook with Dynamic Fees
- * @author Whetstone Research, Isla Labs
+ * @title Uniswap V4 Migrator Hook with Dynamic Fees and Limit Order Support
+ * @dev Extends OpenZeppelin's LimitOrderHook (https://github.com/OpenZeppelin/uniswap-hooks/blob/14be1504717139e10be4ec9c9ec95f5ffe8fba33/src/general/LimitOrderHook.sol)
+ * @author Whetstone Research; Isla Labs
  * @custom:security-contact security@islalabs.co
  */
-contract UniswapV4MigratorHook is BaseHook {
+contract UniswapV4MigratorHook is LimitOrderHook {
     using PoolIdLibrary for PoolKey;
     using SafeCastLib for uint256;
 
-    /// @notice Address of the Uniswap V4 Migrator contract
     address public immutable migrator;
-
-    /// @notice Whitelist registry for retrieving market status
     IWhitelistRegistry public whitelistRegistry;
-
-    /// @notice Address of the HPSwapQuoter contract
     address public immutable swapQuoter;
-
-    /// @notice Address of the HPSwapRouter contract
     address public immutable swapRouter;
-
-    /// @notice Proxy address of the RewardsTreasury contract for PBR distribution
+    address public immutable limitRouter;
     address public immutable rewardsTreasury;
-
-    /// @notice Address of the FeeRouter contract
     address public immutable feeRouter;
 
     // ------------------------------------------
@@ -63,9 +55,10 @@ contract UniswapV4MigratorHook is BaseHook {
     uint256 internal constant ALPHA_TIER_2 = 120;
     uint256 internal constant ALPHA_TIER_3 = 50;
     uint256 internal constant ALPHA_TIER_4 = 100;
-    uint256 internal constant TIER_1_THRESHOLD_USD = 500;
-    uint256 internal constant TIER_2_THRESHOLD_USD = 5000;
-    uint256 internal constant TIER_3_THRESHOLD_USD = 50000;
+    uint256 internal constant TIER_1_THRESHOLD_USD = 0;
+    uint256 internal constant TIER_2_THRESHOLD_USD = 500;
+    uint256 internal constant TIER_3_THRESHOLD_USD = 5000;
+    uint256 internal constant TIER_4_THRESHOLD_USD = 50000;
     uint256 internal constant SCALE_PARAMETER = 1000;
 
     /// @notice Fee split BPS: 89% for Performance Based Returns
@@ -79,17 +72,24 @@ contract UniswapV4MigratorHook is BaseHook {
     event Swap(address indexed token, uint256 sqrtPriceX96);
 
     error OnlyMigrator();
+    error OnlyLimitRouter();
     error ZeroAddress();
     error NotAllowed();
     error MarketSunset();
+    error NeedsUser();
+    error DepositsDisabled();
 
     // ------------------------------------------
     //  Access Control
     // ------------------------------------------
 
-    /// @notice Modifier to ensure the caller is the Uniswap V4 Migrator
     modifier onlyMigrator(address sender) {
         if (sender != migrator) revert OnlyMigrator();
+        _;
+    }
+
+    modifier onlyLimitRouter() {
+        if (msg.sender != limitRouter) revert OnlyLimitRouter();
         _;
     }
 
@@ -98,19 +98,21 @@ contract UniswapV4MigratorHook is BaseHook {
     // ------------------------------------------
 
     constructor(
-        IPoolManager manager, 
+        IPoolManager manager,
         UniswapV4Migrator _migrator,
         IWhitelistRegistry _whitelistRegistry,
         address _swapQuoter,
         address _swapRouter,
+        address _limitRouterProxy,
         address _rewardsTreasury,
         address _feeRouter
-    ) BaseHook(manager) {
+    ) BaseHook(manager) { // BaseHook is an ancestor of LimitOrderHook
         if (
             address(_migrator) == address(0) || 
             address(_whitelistRegistry) == address(0) || 
             _swapQuoter == address(0) || 
             _swapRouter == address(0) || 
+            _limitRouterProxy == address(0) || 
             _rewardsTreasury == address(0) || 
             _feeRouter == address(0)
         ) revert ZeroAddress();
@@ -119,8 +121,27 @@ contract UniswapV4MigratorHook is BaseHook {
         whitelistRegistry = _whitelistRegistry;
         swapQuoter = _swapQuoter;
         swapRouter = _swapRouter;
+        limitRouter = _limitRouterProxy;
         rewardsTreasury = _rewardsTreasury;
         feeRouter = _feeRouter;
+    }
+
+    // When called by HPLimitRouter, reads the appended 20 bytes to build sender
+    function _msgSenderEx() internal view returns (address sender) {
+        if (msg.sender == limitRouter) {
+            assembly { sender := shr(96, calldataload(sub(calldatasize(), 20))) }
+        } else {
+            sender = msg.sender;
+        }
+    }
+
+    // For buy-side ETH limit orders (onlyLimitRouter)
+    receive() external payable {
+        if (msg.sender != limitRouter) revert DepositsDisabled();
+    }
+
+    fallback() external payable {
+        revert DepositsDisabled();
     }
 
     // ------------------------------------------
@@ -130,33 +151,31 @@ contract UniswapV4MigratorHook is BaseHook {
     /// @notice Hook that runs before pool initialization
     function _beforeInitialize(
         address sender,
-        PoolKey calldata key,
-        uint160 sqrtPriceX96
+        PoolKey calldata,
+        uint160
     ) internal view override onlyMigrator(sender) returns (bytes4) {
         return BaseHook.beforeInitialize.selector;
     }
 
     /// @notice Hook that runs before swap
     function _beforeSwap(
-        address sender,
+        address,
         PoolKey calldata key,
-        IPoolManager.SwapParams calldata swapParams,
-        bytes calldata hookData
+        SwapParams calldata swapParams,
+        bytes calldata
     ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
         // Dynamic fee on buys (ETH -> playerToken)
         if (swapParams.zeroForOne) {
+            // Market status check
             if (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1))) revert MarketSunset();
 
-            // Apply dynamic fees on ETH input
+            // Apply dynamic fee on ETH input
             uint256 ethPriceUsd = _fetchEthPriceWithFallback();
-            uint256 inputAmount = uint256(swapParams.amountSpecified < 0 
-                ? -swapParams.amountSpecified 
-                : swapParams.amountSpecified
-            );
+            uint256 inputAmount = uint256(swapParams.amountSpecified < 0 ? -swapParams.amountSpecified : swapParams.amountSpecified);
             uint256 dynamicFeeBps = _calculateDynamicFee(inputAmount, ethPriceUsd);
-            
+
+            // Re-route and update delta
             if (dynamicFeeBps > 0) {
-                // Calculate fee amount in ETH
                 uint256 totalFeeAmount = (inputAmount * dynamicFeeBps) / BPS;
 
                 // Split fees 89:11 for PBR
@@ -164,16 +183,14 @@ contract UniswapV4MigratorHook is BaseHook {
                 uint256 feeAmount = totalFeeAmount - rewardsAmount;
 
                 // Transfer via PoolManager
-                poolManager.take(key.currency0, rewardsTreasury, rewardsAmount);
-                poolManager.take(key.currency0, feeRouter, feeAmount);
-                
+                poolManager().take(key.currency0, rewardsTreasury, rewardsAmount);
+                poolManager().take(key.currency0, feeRouter, feeAmount);
+
                 // Return delta to account for fees taken
-                BeforeSwapDelta delta = toBeforeSwapDelta(totalFeeAmount.toInt128(), 0);
-                
-                return (BaseHook.beforeSwap.selector, delta, 0);
+                return (BaseHook.beforeSwap.selector, toBeforeSwapDelta(totalFeeAmount.toInt128(), 0), 0);
             }
         }
-        
+
         return (BaseHook.beforeSwap.selector, toBeforeSwapDelta(0, 0), 0);
     }
 
@@ -181,52 +198,89 @@ contract UniswapV4MigratorHook is BaseHook {
     function _afterSwap(
         address sender,
         PoolKey calldata key,
-        IPoolManager.SwapParams calldata swapParams,
+        SwapParams calldata swapParams,
         BalanceDelta delta,
         bytes calldata hookData
     ) internal override returns (bytes4, int128) {
-        // Emit swap event for indexer
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
+        // Run limit-order fills
+        super._afterSwap(sender, key, swapParams, delta, hookData);
+
+        // Emit swap event
+        (uint160 sqrtPriceX96,,,) = poolManager().getSlot0(key.toId());
         emit Swap(Currency.unwrap(key.currency1), sqrtPriceX96);
 
         // Dynamic fee on sells (playerToken -> ETH)
         if (!swapParams.zeroForOne) {
             // Decode multi-hop context
             MultiHopContext memory context = _decodeHookData(hookData);
-            
-            // Check activity status & skip fee collection for PlayerToken → PlayerToken multi-hops (router or quoter)
+
+            // Check market status and skip fee on playerToken <> playerToken swaps (via Router/Quoter)
             if (
                 ((sender == swapRouter || sender == swapQuoter) && context.isMultiHop && !context.isUsdc) ||
                 (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1)))
             ) {
                 return (BaseHook.afterSwap.selector, 0);
             }
-            
-            // Apply dynamic fees on ETH output
+
+            // Apply dynamic fee on ETH output
             uint256 ethPriceUsd = _fetchEthPriceWithFallback();
-            uint256 outputAmount = delta.amount0() < 0 
-                ? uint256(uint128(-delta.amount0())) 
+            uint256 outputAmount = delta.amount0() < 0
+                ? uint256(uint128(-delta.amount0()))
                 : uint256(uint128(delta.amount0()));
             uint256 dynamicFeeBps = _calculateDynamicFee(outputAmount, ethPriceUsd);
-            
-            if (dynamicFeeBps > 0) {
-                // Calculate fee amount in ETH
-                uint256 totalFeeAmount = (outputAmount * dynamicFeeBps) / BPS;
 
-                // Split fees 89:11 for PBR
+            // Re-route and update delta
+            if (dynamicFeeBps > 0) {
+                uint256 totalFeeAmount = (outputAmount * dynamicFeeBps) / BPS;
                 uint256 rewardsAmount = (totalFeeAmount * PBR_BPS) / BPS;
                 uint256 feeAmount = totalFeeAmount - rewardsAmount;
 
-                // Transfer via PoolManager
-                poolManager.take(key.currency0, rewardsTreasury, rewardsAmount);
-                poolManager.take(key.currency0, feeRouter, feeAmount);
+                poolManager().take(key.currency0, rewardsTreasury, rewardsAmount);
+                poolManager().take(key.currency0, feeRouter, feeAmount);
 
-                // Return delta to account for fees taken
                 return (BaseHook.afterSwap.selector, totalFeeAmount.toInt128());
             }
         }
-        
+
         return (BaseHook.afterSwap.selector, 0);
+    }
+
+    // ------------------------------------------
+    //  Limit Order Access
+    // ------------------------------------------
+
+    function placeOrder(
+        PoolKey calldata key,
+        int24 tick,
+        bool zeroForOne,
+        uint128 liquidity
+    ) public override onlyLimitRouter {
+        address sender = _msgSenderEx();
+        if (sender == address(0) || sender == limitRouter) revert NeedsUser();
+
+        _placeOrder(key, tick, zeroForOne, liquidity, sender);
+    }
+
+    function cancelOrder(
+        PoolKey calldata key,
+        int24 tickLower,
+        bool zeroForOne,
+        address to
+    ) public override onlyLimitRouter {
+        address sender = _msgSenderEx();
+        if (sender == address(0) || sender == limitRouter) revert NeedsUser();
+
+        _cancelOrder(key, tickLower, zeroForOne, to, sender);
+    }
+
+    function withdraw(
+        OrderIdLibrary.OrderId orderId,
+        address to
+    ) public override onlyLimitRouter returns (uint256 amount0, uint256 amount1) {
+        address sender = _msgSenderEx();
+        if (sender == address(0) || sender == limitRouter) revert NeedsUser();
+
+        return _withdraw(orderId, to, sender);
     }
 
     // ------------------------------------------
@@ -243,21 +297,21 @@ contract UniswapV4MigratorHook is BaseHook {
     function _calculateDynamicFee(uint256 volumeEth, uint256 ethPriceUsd) internal pure returns (uint256 feeBps) {
         // Standardize volume (v) in usd (6dp)
         uint256 volumeUsd = (volumeEth * ethPriceUsd) / (1 ether * 1e6);
-        
+
         // Get decay factor (a), vStartUsd (v_start), feeStart (feeRate_start) based on volume tier
         (uint256 alpha, uint256 vStartUsd, uint256 feeStart) = _getTierParameters(volumeUsd);
-        
+
         // Calculate +difference between volume (v) and tier's starting volume (v_start)
         uint256 volumeDiff = volumeUsd > vStartUsd ? volumeUsd - vStartUsd : 0;
 
         // Build the exponent input and compute the exponential term
         uint256 exponent = (alpha * volumeDiff) / SCALE_PARAMETER;
         uint256 expValue = _calculateExponentialDecay(exponent);
-        
+
         // Map decay into fee range
         uint256 feeRange = feeStart - FEE_MIN_BPS;
         uint256 dynamicComponent = (feeRange * expValue) / 1 ether;
-        
+
         // Final fee in bps
         uint256 result = FEE_MIN_BPS + dynamicComponent;
         return result < FEE_MIN_BPS ? FEE_MIN_BPS : result;
@@ -265,28 +319,23 @@ contract UniswapV4MigratorHook is BaseHook {
 
     /// @notice Get tier parameters based on USD volume
     function _getTierParameters(uint256 volumeUsd) internal pure returns (uint256 alpha, uint256 vStartUsd, uint256 feeStart) {
-        if (volumeUsd <= TIER_1_THRESHOLD_USD) {
-            return (ALPHA_TIER_1, 0, FEE_START_TIER_1);
-        } else if (volumeUsd <= TIER_2_THRESHOLD_USD) {
-            return (ALPHA_TIER_2, TIER_1_THRESHOLD_USD, FEE_START_TIER_2);
-        } else if (volumeUsd <= TIER_3_THRESHOLD_USD) {
-            return (ALPHA_TIER_3, TIER_2_THRESHOLD_USD, FEE_START_TIER_3);
-        } else {
-            return (ALPHA_TIER_4, TIER_3_THRESHOLD_USD, FEE_START_TIER_4);
-        }
+        if (volumeUsd <= TIER_2_THRESHOLD_USD) return (ALPHA_TIER_1, TIER_1_THRESHOLD_USD, FEE_START_TIER_1);
+        if (volumeUsd <= TIER_3_THRESHOLD_USD) return (ALPHA_TIER_2, TIER_2_THRESHOLD_USD, FEE_START_TIER_2);
+        if (volumeUsd <= TIER_4_THRESHOLD_USD) return (ALPHA_TIER_3, TIER_3_THRESHOLD_USD, FEE_START_TIER_3);
+        return (ALPHA_TIER_4, TIER_4_THRESHOLD_USD, FEE_START_TIER_4);
     }
 
     /// @notice Calculate e^(-x/1000) with 18-decimal precision;
     ///         x Unscaled exponent input; function computes e^(-x/1000)
     function _calculateExponentialDecay(uint256 x) internal pure returns (uint256) {
         if (x == 0) return 1 ether; // e^0 = 1
-        if (x >= 10000) return 0;   // e^-10 ≈ 0, return 0 for extreme values
-        
+        if (x >= 10000) return 0;   // e^(-10) ≈ 0 (clamp for extreme values)
+
         // Convert to signed fixed-point and compute e^(-x/1000)
         SD59x18 negativeX = sd(-int256(x)) / sd(1000);
         SD59x18 result = exp(negativeX);
-        
-        return uint256(result.unwrap());
+
+        return uint256(result.unwrap()); // 1e18-scaled
     }
 
     // ------------------------------------------
@@ -295,32 +344,19 @@ contract UniswapV4MigratorHook is BaseHook {
 
     /// @notice Decode hookData into MultiHopContext
     function _decodeHookData(bytes calldata hookData) private pure returns (MultiHopContext memory context) {
-        if (hookData.length == 0) {
-            return MultiHopContext(false, false);
-        }
+        if (hookData.length == 0) return MultiHopContext(false, false);
         return abi.decode(hookData, (MultiHopContext));
     }
 
     /// @notice Fetch ETH price (uses fallback on testnet)
     function _fetchEthPriceWithFallback() internal view returns (uint256 ethPriceUsd) {
-        // Chain ID constants
         uint256 BASE_MAINNET = 8453;
-        
-        // Skip Chainlink on testnets - use fallback price directly
-        if (block.chainid != BASE_MAINNET) {
-            return fallbackEthPriceUsd;
-        }
-        
-        // Only use Chainlink on Base mainnet
-        try AggregatorV3Interface(CHAINLINK_ETH_USD).latestRoundData() returns (
-            uint80, int256 answer, uint256, uint256, uint80
-        ) {
-            if (answer > 0) {
-                return uint256(answer) / 100; // Convert 8→6 decimals
-            }
+        if (block.chainid != BASE_MAINNET) return fallbackEthPriceUsd;
+
+        try AggregatorV3Interface(CHAINLINK_ETH_USD).latestRoundData() returns (uint80, int256 answer, uint256, uint256, uint80) {
+            if (answer > 0) return uint256(answer) / 100; // 8dp -> 6dp
         } catch {}
-        
-        // Fallback for mainnet oracle failures
+
         return fallbackEthPriceUsd;
     }
 
@@ -328,11 +364,11 @@ contract UniswapV4MigratorHook is BaseHook {
     //  Hook Permissions
     // ------------------------------------------
 
-    /// @notice Returns the hook permissions config
+    /// @notice Union of permissions for UniswapV4MigratorHook & LimitOrderHook
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true,
-            afterInitialize: false,
+            afterInitialize: true,
             beforeAddLiquidity: false,
             beforeRemoveLiquidity: false,
             afterAddLiquidity: false,
@@ -360,7 +396,7 @@ contract UniswapV4MigratorHook is BaseHook {
 
     /// @notice Calculate dynamic fee for a given volume
     function simulateDynamicFee(uint256 volumeEth) external view returns (uint256 feeBps, uint256 ethPriceUsd) {
-        ethPriceUsd = _fetchEthPriceWithFallback(); // Display execution price (6 decimals)
+        ethPriceUsd = _fetchEthPriceWithFallback();
         feeBps = _calculateDynamicFee(volumeEth, ethPriceUsd);
     }
 }
