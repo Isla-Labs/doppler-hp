@@ -77,6 +77,8 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     error ZeroAddress();
     error NotAllowed();
     error MarketSunset();
+    error OnlyBuys();
+    error OnlySells();
     error NeedsUser();
     error DepositsDisabled();
 
@@ -257,6 +259,8 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         bool zeroForOne,
         uint128 liquidity
     ) public override onlyLimitRouter {
+        if (zeroForOne) revert OnlySells();
+
         address sender = _msgSenderEx();
         if (sender == address(0) || sender == limitRouter) revert NeedsUser();
 
@@ -270,6 +274,8 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         bool zeroForOne,
         uint128 liquidity
     ) external payable onlyLimitRouter {
+        if (!zeroForOne) revert OnlyBuys();
+
         // Resolve end-user
         address sender = _msgSenderEx();
         if (sender == address(0) || sender == limitRouter) revert NeedsUser();
@@ -277,7 +283,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         // Budget is the ETH forwarded by the router in this call (already incorporates headroom)
         uint256 budget = msg.value;
 
-        // Measure hook balance before placement; OZ callback will consume principal from hook
+        // Measure hook balance before placement
         uint256 balBefore = address(this).balance;
 
         // Computes principal from liquidity and deducts from hook balance
@@ -305,6 +311,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         address sender = _msgSenderEx();
         if (sender == address(0) || sender == limitRouter) revert NeedsUser();
 
+        to = sender;
         _cancelOrder(key, tickLower, zeroForOne, to, sender);
     }
 
@@ -316,6 +323,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         address sender = _msgSenderEx();
         if (sender == address(0) || sender == limitRouter) revert NeedsUser();
 
+        to = limitRouter;
         return _withdraw(orderId, to, sender);
     }
 
