@@ -12,7 +12,7 @@ import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
 import { IWETH, IPermit2, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
-import { MultiHopContext } from "src/stores/MultiHopContext.sol";
+import { SwapContext } from "src/stores/SwapContext.sol";
 
 /// @notice return schema for successful swap
 struct SwapResult {
@@ -36,6 +36,7 @@ contract HPSwapRouter is ReentrancyGuard {
     address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
     address public immutable orchestratorProxy;
+    address public immutable limitRouter;
 
     // ------------------------------------------
     //  Pool Detection Config
@@ -102,6 +103,7 @@ contract HPSwapRouter is ReentrancyGuard {
         IPoolManager _poolManager,
         IWhitelistRegistry _registry,
         address _orchestratorProxy,
+        address _limitRouterProxy,
         address _positionManager,
         bytes32 _ethUsdcPoolId
     ) {
@@ -109,12 +111,14 @@ contract HPSwapRouter is ReentrancyGuard {
             address(_poolManager) == address(0) || 
             address(_registry) == address(0) || 
             _orchestratorProxy == address(0) || 
+            _limitRouterProxy == address(0) || 
             _positionManager == address(0)
         ) revert ZeroAddress();
 
         poolManager = _poolManager;
         registry = _registry;
         orchestratorProxy = _orchestratorProxy;
+        limitRouter = _limitRouterProxy;
         positionManager = _positionManager;
         
         ETH = address(0);
@@ -281,8 +285,8 @@ contract HPSwapRouter is ReentrancyGuard {
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
             _settleExactIn(Currency.wrap(inputToken), amountIn);
 
-            bytes memory hop1 = abi.encode(MultiHopContext({ isMultiHop: true, isUsdc: false }));
-            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, hop1);
+            bytes memory ctx = abi.encode(SwapContext({ skipFee: true }));
+            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, ctx);
 
             uint256 ethInterim = _managerOwed(Currency.wrap(ETH));
             if (!migratedIn) {
@@ -306,9 +310,12 @@ contract HPSwapRouter is ReentrancyGuard {
 
         } else if (inIsPT && outIsETHish) {
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
-
             _settleExactIn(Currency.wrap(inputToken), amountIn);
-            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, bytes(""));
+
+            bytes memory hookData = (recipient == limitRouter)
+                ? abi.encode(SwapContext({ skipFee: true }))
+                : bytes("");
+            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, hookData);
 
             res.amountOut = _managerOwed(Currency.wrap(ETH));
             if (res.amountOut != 0) {
@@ -355,8 +362,7 @@ contract HPSwapRouter is ReentrancyGuard {
             PoolKey memory keyMid = _ethUsdcKey();
 
             _settleExactIn(Currency.wrap(inputToken), amountIn);
-            bytes memory hop1u = abi.encode(MultiHopContext({ isMultiHop: true, isUsdc: true }));
-            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, hop1u);
++           _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, bytes(""));
 
             uint256 ethInterim = _managerOwed(Currency.wrap(ETH));
             if (migratedIn) {

@@ -9,7 +9,7 @@ import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
 import { IV4Quoter, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
-import { MultiHopContext } from "src/stores/MultiHopContext.sol";
+import { SwapContext } from "src/stores/SwapContext.sol";
 
 /// @notice return schema for successful quote
 struct QuoteResult {
@@ -198,10 +198,11 @@ contract HPSwapQuoter {
 
         // PT -> PT (two hops via ETH)
         if (inIsPT && outIsPT) {
-            // First hop: PT(in) -> ETH (mark multihop, isUsdc=false)
+            // First hop: PT(in) -> ETH (mark swapctx, skipFee=true)
             (PoolKey memory key1, bool migratedIn, address dopplerIn, address migratorIn) = _playerKeyAndHooks(inputToken);
             (uint256 ethOut, uint256 gas1) =
-                _quoteSingle(key1, /*zeroForOne*/ false, amountIn, /*isMultiHopFirst=*/ true, /*isUsdc=*/ false);
+                _quoteSingle(key1, /*zeroForOne*/ false, amountIn, /*skipFee=*/ true);
+
             // Fee: if migratedIn -> first-hop fee is skipped (hpQuoter gated); else Doppler 3% on ETH output
             if (!migratedIn) {
                 qr.totalFeesEth += _feeOnEthOutput(ethOut, 300); // 3% = 300 bps
@@ -210,7 +211,7 @@ contract HPSwapQuoter {
             // Second hop: ETH -> PT(out) (single hop)
             (PoolKey memory key2, bool migratedOut, address dopplerOut, address migratorOut) = _playerKeyAndHooks(outputToken);
             (uint256 ptOut, uint256 gas2) =
-                _quoteSingle(key2, /*zeroForOne*/ true, ethOut, /*isMultiHopFirst=*/ false, /*isUsdc=*/ false);
+                _quoteSingle(key2, /*zeroForOne*/ true, ethOut, /*skipFee=*/ false);
             qr.amountOut = ptOut;
             qr.gasEstimate = gas1 + gas2;
 
@@ -228,7 +229,7 @@ contract HPSwapQuoter {
         if (inIsPT && outIsETHish) {
             (PoolKey memory key, bool migratedIn, address dopplerIn, address migratorIn) = _playerKeyAndHooks(inputToken);
             (uint256 ethOut, uint256 gas1) =
-                _quoteSingle(key, /*zeroForOne*/ false, amountIn, /*isMultiHopFirst=*/ false, /*isUsdc=*/ false);
+                _quoteSingle(key, /*zeroForOne*/ false, amountIn, /*skipFee=*/ false);
             qr.amountOut = ethOut;
             qr.gasEstimate = gas1;
 
@@ -246,7 +247,7 @@ contract HPSwapQuoter {
         if (outIsPT && inIsETHish) {
             (PoolKey memory key, bool migratedOut, address dopplerOut, address migratorOut) = _playerKeyAndHooks(outputToken);
             (uint256 ptOut, uint256 gas1) =
-                _quoteSingle(key, /*zeroForOne*/ true, amountIn, /*isMultiHopFirst=*/ false, /*isUsdc=*/ false);
+                _quoteSingle(key, /*zeroForOne*/ true, amountIn, /*skipFee=*/ false);
             qr.amountOut = ptOut;
             qr.gasEstimate = gas1;
 
@@ -266,7 +267,7 @@ contract HPSwapQuoter {
             if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
             (PoolKey memory key1, bool migratedIn, address dopplerIn, address migratorIn) = _playerKeyAndHooks(inputToken);
             (uint256 ethOut, uint256 gas1) =
-                _quoteSingle(key1, /*zeroForOne*/ false, amountIn, /*isMultiHopFirst=*/ true, /*isUsdc=*/ true);
+                _quoteSingle(key1, /*zeroForOne*/ false, amountIn, /*skipFee=*/ false);
             // Fee on ETH output (no skip because isUsdc=true)
             if (migratedIn) {
                 uint256 bps1 = _migratorFeeBps(migratorIn, ethOut);
@@ -278,7 +279,7 @@ contract HPSwapQuoter {
             // Second hop: ETH -> USDC (single hop) [ETH input → Uniswap fee]
             PoolKey memory key2 = _ethUsdcKey();
             (uint256 usdcOut, uint256 gas2) =
-                _quoteSingle(key2, /*zeroForOne*/ true, ethOut, /*isMultiHopFirst=*/ false, /*isUsdc=*/ false);
+                _quoteSingle(key2, /*zeroForOne*/ true, ethOut, /*skipFee=*/ false);
             qr.amountOut = usdcOut;
             qr.gasEstimate = gas1 + gas2;
 
@@ -293,7 +294,7 @@ contract HPSwapQuoter {
             if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
             PoolKey memory key1 = _ethUsdcKey();
             (uint256 ethOut, uint256 gas1) =
-                _quoteSingle(key1, /*zeroForOne*/ false, amountIn, /*isMultiHopFirst=*/ false, /*isUsdc=*/ false);
+                _quoteSingle(key1, /*zeroForOne*/ false, amountIn, /*skipFee=*/ false);
             // Uniswap v4 fee on USDC input → convert to ETH and accumulate
             {
                 uint256 usdcFee = _feeOnUsdcInput(amountIn, _v4FeeBps(ethUsdcFee));
@@ -307,7 +308,7 @@ contract HPSwapQuoter {
             // Second hop: ETH -> PT(out) (single hop) [ETH input]
             (PoolKey memory key2, bool migratedOut, address dopplerOut, address migratorOut) = _playerKeyAndHooks(outputToken);
             (uint256 ptOut, uint256 gas2) =
-                _quoteSingle(key2, /*zeroForOne*/ true, ethOut, /*isMultiHopFirst=*/ false, /*isUsdc=*/ false);
+                _quoteSingle(key2, /*zeroForOne*/ true, ethOut, /*skipFee=*/ false);
             qr.amountOut = ptOut;
             qr.gasEstimate = gas1 + gas2;
 
@@ -338,12 +339,9 @@ contract HPSwapQuoter {
         PoolKey memory key,
         bool zeroForOne,
         uint256 exactIn,
-        bool isMultiHopFirst,
-        bool isUsdc
+        bool skipFee
     ) internal returns (uint256 amountOut, uint256 gasEstimate) {
-        bytes memory hookData = isMultiHopFirst
-            ? abi.encode(MultiHopContext({ isMultiHop: true, isUsdc: isUsdc }))
-            : bytes("");
+        bytes memory hookData = skipFee ? abi.encode(SwapContext({ skipFee: true })) : bytes("");
         (amountOut, gasEstimate) = quoter.quoteExactInputSingle(
             IV4Quoter.QuoteExactSingleParams({
                 poolKey: key,
