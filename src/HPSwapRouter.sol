@@ -285,8 +285,8 @@ contract HPSwapRouter is ReentrancyGuard {
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
             _settleExactIn(Currency.wrap(inputToken), amountIn);
 
-            bytes memory ctx = abi.encode(SwapContext({ skipFee: true }));
-            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, ctx);
+            bytes memory hookData = abi.encode(SwapContext({ skipFee: true }));
+            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, hookData);
 
             uint256 ethInterim = _managerOwed(Currency.wrap(ETH));
             if (!migratedIn) {
@@ -362,7 +362,7 @@ contract HPSwapRouter is ReentrancyGuard {
             PoolKey memory keyMid = _ethUsdcKey();
 
             _settleExactIn(Currency.wrap(inputToken), amountIn);
-+           _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, bytes(""));
+            _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, bytes(""));
 
             uint256 ethInterim = _managerOwed(Currency.wrap(ETH));
             if (migratedIn) {
