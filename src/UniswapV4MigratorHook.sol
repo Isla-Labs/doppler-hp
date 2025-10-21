@@ -15,7 +15,7 @@ import { SD59x18, exp, sd } from "@prb/math/src/SD59x18.sol";
 import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 import { AggregatorV3Interface } from "src/interfaces/AggregatorV3Interface.sol";
-import { MultiHopContext } from "src/stores/MultiHopContext.sol";
+import { SwapContext } from "src/stores/SwapContext.sol";
 
 /**
  * @title Uniswap V4 Migrator Hook with Dynamic Fees and Limit Order Support
@@ -204,11 +204,11 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         // Dynamic fee on sells (playerToken -> ETH)
         if (!swapParams.zeroForOne) {
             // Decode multi-hop context
-            MultiHopContext memory context = _decodeHookData(hookData);
+            SwapContext memory ctx = _decodeHookData(hookData);
 
             // Check market status and skip fee on playerToken <> playerToken swaps (via Router/Quoter)
             if (
-                ((sender == swapRouter || sender == swapQuoter) && context.isMultiHop && !context.isUsdc) ||
+                ((sender == swapRouter || sender == swapQuoter) && ctx.skipFee) ||
                 (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1)))
             ) {
                 return (BaseHook.afterSwap.selector, 0);
@@ -379,9 +379,9 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     // ------------------------------------------
 
     /// @notice Decode hookData into MultiHopContext
-    function _decodeHookData(bytes calldata hookData) private pure returns (MultiHopContext memory context) {
-        if (hookData.length == 0) return MultiHopContext(false, false);
-        return abi.decode(hookData, (MultiHopContext));
+    function _decodeHookData(bytes calldata hookData) private pure returns (SwapContext memory context) {
+        if (hookData.length == 0) return SwapContext(false);
+        return abi.decode(hookData, (SwapContext));
     }
 
     /// @notice Fetch ETH price (uses fallback on testnet)
