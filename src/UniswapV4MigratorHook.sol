@@ -206,7 +206,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
             // Decode multi-hop context
             SwapContext memory ctx = _decodeHookData(hookData);
 
-            // Check market status and skip fee on playerToken <> playerToken swaps (via Router/Quoter)
+            // Check market status, skip fee on multihops & limit withdrawals
             if (
                 ((sender == swapRouter || sender == swapQuoter) && ctx.skipFee) ||
                 (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1)))
@@ -378,7 +378,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     //  Internal
     // ------------------------------------------
 
-    /// @notice Decode hookData into MultiHopContext
+    /// @notice Decode hookData into SwapContext
     function _decodeHookData(bytes calldata hookData) private pure returns (SwapContext memory context) {
         if (hookData.length == 0) return SwapContext(false);
         return abi.decode(hookData, (SwapContext));
