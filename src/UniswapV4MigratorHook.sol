@@ -109,7 +109,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         address _limitRouterProxy,
         address _rewardsTreasury,
         address _feeRouter
-    ) BaseHook(manager) { // BaseHook is an ancestor of LimitOrderHook
+    ) BaseHook(manager) { 
         if (
             address(_migrator) == address(0) || 
             address(_whitelistRegistry) == address(0) || 
