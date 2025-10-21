@@ -271,18 +271,6 @@ contract FeeRouter is ReentrancyGuard {
         _convertBondingFee(token, true);
     }
 
-    /// @notice Can recover stray ERC20 balances (non playerToken)
-    function rescueErc20(address token, address to, uint256 amount) external onlyOrchestrator nonReentrant {
-        if (whitelistRegistry.isMarketActive(token)) revert Unauthorized();
-
-        uint256 bal = IERC20(token).balanceOf(address(this));
-        if (bal == 0) revert NoBalance(token);
-        if (amount > bal) revert InsufficientBalance(amount, bal);
-
-        IERC20(token).safeTransfer(to, amount);
-        emit Recovered(to, amount, token);
-    }
-
     // ------------------------------------------
     //  View
     // ------------------------------------------
