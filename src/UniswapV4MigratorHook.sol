@@ -19,7 +19,7 @@ import { SwapContext } from "src/stores/SwapContext.sol";
 
 /**
  * @title Uniswap V4 Migrator Hook with Dynamic Fees and Limit Order Support
- * @dev Dynamic fee is a more efficient pricing mechanism for rewardsTreasury contributions; mitigates 1:!1 correlation between volume and PBR
+ * @dev Dynamic fee is a more efficient pricing mechanism for rewardsTreasury contributions; mitigates non-1:1 correlation between volume and PBR
  * @dev Extends OpenZeppelin's LimitOrderHook (https://github.com/OpenZeppelin/uniswap-hooks/blob/14be1504717139e10be4ec9c9ec95f5ffe8fba33/src/general/LimitOrderHook.sol)
  *      - Local import uses trusted forwarder pattern to replace msg.sender in OZ LimitOrderHook with new sender param; all other functionality remains intact
  * @author Whetstone Research; Isla Labs
