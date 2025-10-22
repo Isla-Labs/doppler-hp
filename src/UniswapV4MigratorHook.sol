@@ -42,6 +42,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
 
     /// @notice Chainlink ETH-USD price feed on Base
     address public immutable CHAINLINK_ETH_USD = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
+    uint8 public immutable feedDecimals;
     
     /// @notice Fallback ETH-USD price for testnet
     uint256 public immutable fallbackEthPriceUsd = 3000000000; // (6 decimals)
@@ -127,6 +128,14 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         limitRouter = _limitRouterProxy;
         rewardsTreasury = _rewardsTreasury;
         feeRouter = _feeRouter;
+
+        uint8 _dec = 8;
+        if (block.chainid == 8453) {
+            try AggregatorV3Interface(CHAINLINK_ETH_USD).decimals() returns (uint8 d) {
+                _dec = d;
+            } catch {}
+        }
+        feedDecimals = _dec;
     }
 
     // For buy-side ETH limit orders (onlyLimitRouter)
@@ -164,9 +173,10 @@ contract UniswapV4MigratorHook is LimitOrderHook {
             if (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1))) revert MarketSunset();
 
             // Apply dynamic fee on ETH input
-            uint256 ethPriceUsd = _fetchEthPriceWithFallback();
-            uint256 inputAmount = uint256(swapParams.amountSpecified < 0 ? -swapParams.amountSpecified : swapParams.amountSpecified);
-            uint256 dynamicFeeBps = _calculateDynamicFee(inputAmount, ethPriceUsd);
+            uint256 inputAmount = uint256(swapParams.amountSpecified < 0 
+                ? -swapParams.amountSpecified 
+                : swapParams.amountSpecified);
+            uint256 dynamicFeeBps = _calculateDynamicFee(inputAmount);
 
             // Re-route and update delta
             if (dynamicFeeBps > 0) {
@@ -217,11 +227,10 @@ contract UniswapV4MigratorHook is LimitOrderHook {
             }
 
             // Apply dynamic fee on ETH output
-            uint256 ethPriceUsd = _fetchEthPriceWithFallback();
             uint256 outputAmount = delta.amount0() < 0
                 ? uint256(uint128(-delta.amount0()))
                 : uint256(uint128(delta.amount0()));
-            uint256 dynamicFeeBps = _calculateDynamicFee(outputAmount, ethPriceUsd);
+            uint256 dynamicFeeBps = _calculateDynamicFee(outputAmount);
 
             // Re-route and update delta
             if (dynamicFeeBps > 0) {
@@ -331,14 +340,20 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     //  Dynamic Fee Calculation
     // ------------------------------------------
 
+    /// @notice Convert ETH volume into dynamic fee bps
+    function _calculateDynamicFee(uint256 volumeEth) internal view returns (uint256 feeBps) {
+        uint256 ethPriceUsd = _ethPriceUsd();
+        return _dynamicFeeCalculation(volumeEth, ethPriceUsd);
+    }
+
     /**
-     * @notice Calculate dynamic fee with exponential decay
+     * @notice Dynamic fee with exponential decay
      * @dev feeRate = min_fee + (feeRate_start - fee_min) * e^(-a * (v - v_start) / scale)
      * @param volumeEth Volume in ETH (wei)
      * @param ethPriceUsd ETH price in USD (6 decimals)
      * @return feeBps Fee in basis points
      */
-    function _calculateDynamicFee(uint256 volumeEth, uint256 ethPriceUsd) internal pure returns (uint256 feeBps) {
+    function _dynamicFeeCalculation(uint256 volumeEth, uint256 ethPriceUsd) internal pure returns (uint256 feeBps) {
         // Standardize volume (v) in usd (6dp)
         uint256 volumeUsd = (volumeEth * ethPriceUsd) / (1 ether * 1e6);
 
@@ -361,7 +376,13 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         return result < FEE_MIN_BPS ? FEE_MIN_BPS : result;
     }
 
-    /// @notice Get tier parameters based on USD volume
+    /**
+     * @notice Get tier parameters based on USD volume
+     * @dev Returns static variables from cache so that volume (v) is the only dynamic input
+     * @return alpha Decay factor for fee tier
+     * @return vStartUsd Starting volume threshold for fee tier
+     * @return feeStart Precomputed fee (bps) at vStartUsd for fee tier
+     */
     function _getTierParameters(uint256 volumeUsd) internal pure returns (uint256 alpha, uint256 vStartUsd, uint256 feeStart) {
         if (volumeUsd <= TIER_2_THRESHOLD_USD) return (ALPHA_TIER_1, TIER_1_THRESHOLD_USD, FEE_START_TIER_1);
         if (volumeUsd <= TIER_3_THRESHOLD_USD) return (ALPHA_TIER_2, TIER_2_THRESHOLD_USD, FEE_START_TIER_2);
@@ -369,9 +390,13 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         return (ALPHA_TIER_4, TIER_4_THRESHOLD_USD, FEE_START_TIER_4);
     }
 
-    /// @notice Calculate e^(-x/1000) with 18-decimal precision;
-    ///         x Unscaled exponent input; function computes e^(-x/1000)
-    function _calculateExponentialDecay(uint256 x) internal pure returns (uint256) {
+    /**
+	 * @notice Calculate e^(-x/1000) with 18-decimal precision
+     * @dev Uses PRBMath SD59x18 to evaluate exp on the signed fixed-point input -x/1000
+	 * @param x Unscaled exponent input
+     * @return value The 1e18-scaled result of e^(-x/1000)
+     */
+    function _calculateExponentialDecay(uint256 x) internal pure returns (uint256 value) {
         if (x == 0) return 1 ether; // e^0 = 1
         if (x >= 10000) return 0;   // e^(-10) ≈ 0 (clamp for extreme values)
 
@@ -393,12 +418,22 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     }
 
     /// @notice Fetch ETH price (uses fallback on testnet)
-    function _fetchEthPriceWithFallback() internal view returns (uint256 ethPriceUsd) {
-        uint256 BASE_MAINNET = 8453;
-        if (block.chainid != BASE_MAINNET) return fallbackEthPriceUsd;
+    function _ethPriceUsd() internal view returns (uint256 ethPriceUsd) {
+        if (block.chainid != 8453) return fallbackEthPriceUsd;
 
-        try AggregatorV3Interface(CHAINLINK_ETH_USD).latestRoundData() returns (uint80, int256 answer, uint256, uint256, uint80) {
-            if (answer > 0) return uint256(answer) / 100; // 8dp -> 6dp
+        try AggregatorV3Interface(CHAINLINK_ETH_USD).latestRoundData()
+            returns (uint80 roundId, int256 answer, uint256 /* startedAt */, uint256 updatedAt, uint80 answeredInRound)
+        {
+            if (answer > 0 && updatedAt != 0 && answeredInRound >= roundId) {
+                uint8 dec = feedDecimals;
+                if (dec >= 6) {
+                    uint256 factor = 10 ** (uint256(dec) - 6);
+                    return uint256(answer) / factor;
+                } else {
+                    uint256 factor = 10 ** (6 - uint256(dec));
+                    return uint256(answer) * factor;
+                }
+            }
         } catch {}
 
         return fallbackEthPriceUsd;
@@ -435,12 +470,12 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     /// @notice Gated ETH/USD price for router/quoter fee conversion (6 decimals)
     function quoteEthPriceUsd() external view returns (uint256 ethPriceUsd) {
         if (msg.sender != swapRouter && msg.sender != swapQuoter) revert NotAllowed();
-        return _fetchEthPriceWithFallback();
+        return _ethPriceUsd();
     }
 
     /// @notice Calculate dynamic fee for a given volume
     function simulateDynamicFee(uint256 volumeEth) external view returns (uint256 feeBps, uint256 ethPriceUsd) {
-        ethPriceUsd = _fetchEthPriceWithFallback();
-        feeBps = _calculateDynamicFee(volumeEth, ethPriceUsd);
+        ethPriceUsd = _ethPriceUsd();
+        feeBps = _dynamicFeeCalculation(volumeEth, ethPriceUsd);
     }
 }
