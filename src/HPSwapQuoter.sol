@@ -25,7 +25,7 @@ struct QuoteResult {
  * @custom:security-contact security@islalabs.co
  */
 contract HPSwapQuoter {
-    // Core dependencies
+    
     IPoolManager public immutable poolManager;
     address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
@@ -36,16 +36,16 @@ contract HPSwapQuoter {
     //  Pool Detection Config
     // ------------------------------------------
 
-    // Pairs
+    /// @notice Pairs
     address public immutable ETH;
     address public immutable WETH;
     address public immutable USDC;
 
-    // Migrated playerToken pool params
+    /// @notice Migrated playerToken pool params
     uint24 public constant migratorFee = 1000;
     int24 public constant migratorTickSpacing = 10;
 
-    // Updateable ETH/USDC pool params
+    /// @notice Updateable ETH/USDC pool params
     bytes32 public ethUsdcPoolId;
     address public ethUsdcBase;
     uint24 public ethUsdcFee;

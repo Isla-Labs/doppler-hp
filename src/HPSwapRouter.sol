@@ -31,7 +31,6 @@ contract HPSwapRouter is ReentrancyGuard {
     using SafeERC20 for IERC20;
     using SafeCastLib for uint256;
     
-    // Core dependencies
     IPoolManager public immutable poolManager;
     address public immutable positionManager;
     IWhitelistRegistry public immutable registry;
@@ -42,19 +41,19 @@ contract HPSwapRouter is ReentrancyGuard {
     //  Pool Detection Config
     // ------------------------------------------
 
-    // Permit2
+    /// @notice Permit2
     address public immutable PERMIT2;
 
-    // Pairs
+    /// @notice Pairs
     address public immutable ETH;
     address public immutable USDC;
     address public immutable WETH;
 
-    // Migrated playerToken pool params
+    /// @notice Migrated playerToken pool params
     uint24 public constant migratorFee = 1000;
     int24 public constant migratorTickSpacing = 10;
 
-    // Updateable ETH/USDC pool params (derived from poolId)
+    /// @notice Updateable ETH/USDC pool params (derived from poolId)
     bytes32 public ethUsdcPoolId;
     address public ethUsdcBase;
     uint24 public ethUsdcFee;
