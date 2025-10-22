@@ -9,12 +9,12 @@ pragma solidity ^0.8.24;
  */
 contract WhitelistRegistry {
 
+    bool private initialized;
+    address private invoker;
+
     address public airlock;
     address public airlockMultisig;
     address public marketSunsetter;
-
-    bool private initialized;
-    address private invoker;
 
     // ------------------------------------------
     //  Storage
