@@ -7,6 +7,12 @@ import { SafeERC20 } from "@openzeppelin/token/ERC20/utils/SafeERC20.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 import { IHPSwapRouter } from "src/interfaces/IHPSwapRouter.sol";
 
+/**
+ * @title Fee Router with configurable recipients
+ * @notice Automatically splits and re-routes hook fees for performance based returns
+ * @author Isla Labs
+ * @custom:security-contact security@islalabs.co
+ */
 contract FeeRouter is ReentrancyGuard {
     using SafeERC20 for IERC20;
     
