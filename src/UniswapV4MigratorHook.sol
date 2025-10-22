@@ -43,10 +43,11 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     // ------------------------------------------
 
     /// @notice Chainlink ETH-USD price feed on Base
-    /// @dev Falls back to arbitrary price on Base Sepolia
     address public immutable CHAINLINK_ETH_USD;
-    uint256 public immutable fallbackEthPriceUsd;
     uint8 public immutable feedDecimals;
+
+    /// @notice Fallback ETH-USD price for testnet
+    uint256 public immutable fallbackEthPriceUsd;
 
     /// @notice Dynamic fee constants
     uint256 internal constant FEE_START_TIER_1 = 500;
