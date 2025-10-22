@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
+import { Initializable } from "@openzeppelin/proxy/utils/Initializable.sol";
 import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
@@ -23,22 +24,22 @@ struct QuoteResult {
  * @author Isla Labs
  * @custom:security-contact security@islalabs.co
  */
-contract HPSwapQuoter {
+contract HPSwapQuoter is Initializable {
     
-    IPoolManager public immutable poolManager;
-    address public immutable positionManager;
-    IWhitelistRegistry public immutable registry;
-    IV4Quoter public immutable quoter;
-    address public immutable orchestratorProxy;
+    IPoolManager public poolManager;
+    address public positionManager;
+    IWhitelistRegistry public registry;
+    IV4Quoter public quoter;
+    address public orchestratorProxy;
 
     // ------------------------------------------
     //  Pool Detection Config
     // ------------------------------------------
 
     /// @notice Pairs
-    address public immutable ETH;
-    address public immutable WETH;
-    address public immutable USDC;
+    address public ETH;
+    address public WETH;
+    address public USDC;
 
     /// @notice Migrated playerToken pool params
     uint24 public constant migratorFee = 1000;
@@ -72,17 +73,21 @@ contract HPSwapQuoter {
     }
 
     // ------------------------------------------
-    //  Constructor
+    //  Initialization
     // ------------------------------------------
 
-    constructor(
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
         IPoolManager _poolManager,
         IWhitelistRegistry _registry,
         IV4Quoter _quoter,
         address _orchestratorProxy,
         address _positionManager,
         bytes32 _ethUsdcPoolId
-    ) {
+    ) external initializer {
         if (
             address(_poolManager) == address(0) || 
             address(_registry) == address(0) || 
@@ -91,6 +96,17 @@ contract HPSwapQuoter {
             _positionManager == address(0)
         ) revert ZeroAddress();
 
+        _init(_poolManager, _registry, _quoter, _orchestratorProxy, _positionManager, _ethUsdcPoolId);
+    }
+
+    function _init(
+        IPoolManager _poolManager,
+        IWhitelistRegistry _registry,
+        IV4Quoter _quoter,
+        address _orchestratorProxy,
+        address _positionManager,
+        bytes32 _ethUsdcPoolId
+    ) private {
         poolManager = _poolManager;
         registry = _registry;
         quoter = _quoter;
@@ -122,6 +138,7 @@ contract HPSwapQuoter {
             ethUsdcFee = fee;
             ethUsdcTickSpacing = spacing;
             ethUsdcPoolId = _ethUsdcPoolId;
+            
         } else {
             ethUsdcBase = address(0);
             ethUsdcFee = 0;

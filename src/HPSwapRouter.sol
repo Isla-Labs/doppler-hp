@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
+import { Initializable } from "@openzeppelin/proxy/utils/Initializable.sol";
 import { ReentrancyGuard } from "@openzeppelin/utils/ReentrancyGuard.sol";
 import { IERC20 } from "@openzeppelin/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/token/ERC20/utils/SafeERC20.sol";
@@ -27,27 +28,27 @@ struct SwapResult {
  * @author Isla Labs
  * @custom:security-contact security@islalabs.co
  */
-contract HPSwapRouter is ReentrancyGuard {
+contract HPSwapRouter is Initializable, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using SafeCastLib for uint256;
     
-    IPoolManager public immutable poolManager;
-    address public immutable positionManager;
-    IWhitelistRegistry public immutable registry;
-    address public immutable orchestratorProxy;
-    address public immutable limitRouter;
+    IPoolManager public poolManager;
+    address public positionManager;
+    IWhitelistRegistry public registry;
+    address public orchestratorProxy;
+    address public limitRouter;
 
     // ------------------------------------------
     //  Pool Detection Config
     // ------------------------------------------
 
     /// @notice Permit2
-    address public immutable PERMIT2;
+    address public PERMIT2;
 
     /// @notice Pairs
-    address public immutable ETH;
-    address public immutable USDC;
-    address public immutable WETH;
+    address public ETH;
+    address public USDC;
+    address public WETH;
 
     /// @notice Migrated playerToken pool params
     uint24 public constant migratorFee = 1000;
@@ -95,17 +96,21 @@ contract HPSwapRouter is ReentrancyGuard {
     }
 
     // ------------------------------------------
-    //  Constructor
+    //  Initialization
     // ------------------------------------------
 
-    constructor(
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
         IPoolManager _poolManager,
         IWhitelistRegistry _registry,
         address _orchestratorProxy,
         address _limitRouterProxy,
         address _positionManager,
         bytes32 _ethUsdcPoolId
-    ) {
+    ) external initializer {
         if (
             address(_poolManager) == address(0) || 
             address(_registry) == address(0) || 
@@ -114,6 +119,17 @@ contract HPSwapRouter is ReentrancyGuard {
             _positionManager == address(0)
         ) revert ZeroAddress();
 
+        _init(_poolManager, _registry, _orchestratorProxy, _limitRouterProxy, _positionManager, _ethUsdcPoolId);
+    }
+
+    function _init(
+        IPoolManager _poolManager,
+        IWhitelistRegistry _registry,
+        address _orchestratorProxy,
+        address _limitRouterProxy,
+        address _positionManager,
+        bytes32 _ethUsdcPoolId
+    ) private {
         poolManager = _poolManager;
         registry = _registry;
         orchestratorProxy = _orchestratorProxy;
@@ -156,14 +172,10 @@ contract HPSwapRouter is ReentrancyGuard {
     }
 
     receive() external payable {
-        if (msg.sender != address(poolManager) && msg.sender != WETH) {
-            revert("DIRECT_ETH_DISABLED");
-        }
+        if (msg.sender != address(poolManager) && msg.sender != WETH) { revert("DIRECT_ETH_DISABLED"); }
     }
 
-    fallback() external payable {
-        revert("DIRECT_ETH_DISABLED");
-    }
+    fallback() external payable { revert("DIRECT_ETH_DISABLED"); }
 
     // ------------------------------------------
     //  Upkeep
