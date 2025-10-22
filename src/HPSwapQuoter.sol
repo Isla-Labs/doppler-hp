@@ -20,7 +20,7 @@ struct QuoteResult {
 
 /**
  * @title HP Swap Quoter
- * @dev Automatic pool detection and fee reduction for multihops
+ * @notice Quoter with automatic pool detection and fee reduction for multihops
  * @author Isla Labs
  * @custom:security-contact security@islalabs.co
  */

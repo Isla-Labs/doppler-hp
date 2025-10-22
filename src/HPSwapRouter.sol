@@ -24,7 +24,7 @@ struct SwapResult {
 
 /**
  * @title HP Swap Router
- * @dev Swap API with automatic pool detection, fee reduction for multihops, and UR-style hardening
+ * @notice Swap API with automatic pool detection, fee reduction for multihops, and UR-style hardening
  * @author Isla Labs
  * @custom:security-contact security@islalabs.co
  */
