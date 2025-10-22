@@ -29,8 +29,9 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     using PoolIdLibrary for PoolKey;
     using SafeCastLib for uint256;
 
+    IWhitelistRegistry public immutable whitelistRegistry;
+
     address public immutable migrator;
-    IWhitelistRegistry public whitelistRegistry;
     address public immutable swapQuoter;
     address public immutable swapRouter;
     address public immutable limitRouter;
@@ -42,11 +43,9 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     // ------------------------------------------
 
     /// @notice Chainlink ETH-USD price feed on Base
-    address public immutable CHAINLINK_ETH_USD = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
+    address public immutable CHAINLINK_ETH_USD;
+    uint256 public immutable fallbackEthPriceUsd; // for Base Sepolia
     uint8 public immutable feedDecimals;
-    
-    /// @notice Fallback ETH-USD price for testnet
-    uint256 public immutable fallbackEthPriceUsd = 3000000000; // (6 decimals)
 
     /// @notice Dynamic fee constants
     uint256 internal constant FEE_START_TIER_1 = 500;
@@ -129,6 +128,9 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         limitRouter = limitRouterProxy_;
         rewardsTreasury = rewardsTreasury_;
         feeRouter = feeRouter_;
+
+        CHAINLINK_ETH_USD = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
+        fallbackEthPriceUsd = 3000000000; // 6 decimals
 
         uint8 _dec = 8;
         if (block.chainid == 8453) {
