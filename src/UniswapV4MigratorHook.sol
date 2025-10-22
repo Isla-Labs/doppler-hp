@@ -354,7 +354,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
      * @return feeBps Fee in basis points
      */
     function _dynamicFeeCalculation(uint256 volumeEth, uint256 ethPriceUsd) internal pure returns (uint256 feeBps) {
-        // Standardize volume (v) in usd (6dp)
+        // Standardize volume (v) in usd
         uint256 volumeUsd = (volumeEth * ethPriceUsd) / (1 ether * 1e6);
 
         // Get decay factor (a), vStartUsd (v_start), feeStart (feeRate_start) based on volume tier
@@ -379,6 +379,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     /**
      * @notice Get tier parameters based on USD volume
      * @dev Returns static variables from cache so that volume (v) is the only dynamic input
+     * @param volumeUsd Volume in USD (optionally pre-converted for stable fee tiers)
      * @return alpha Decay factor for fee tier
      * @return vStartUsd Starting volume threshold for fee tier
      * @return feeStart Precomputed fee (bps) at vStartUsd for fee tier
