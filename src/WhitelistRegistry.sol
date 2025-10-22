@@ -8,17 +8,13 @@ pragma solidity ^0.8.24;
  * @custom:security-contact security@islalabs.co
  */
 contract WhitelistRegistry {
-    /// @notice Address of the Airlock contract
-    address public airlock;
 
-    /// @notice Address of the AirlockMultisig contract
-    address public airlockMultisig;
-
-    /// @notice Address of the MarketSunsetter contract
-    address public marketSunsetter;
-
-    /// @notice Initialization tag
     bool public initialized;
+    
+    address public airlock;
+    address public airlockMultisig;
+    address public marketSunsetter;
+    address public invoker;
 
     // ------------------------------------------
     //  Storage
@@ -54,38 +50,6 @@ contract WhitelistRegistry {
     error AlreadyInitialized();
 
     // ------------------------------------------
-    //  Constructor
-    // ------------------------------------------
-    
-    constructor(
-        address _airlock,
-        address _airlockMultisig, 
-        address _marketSunsetter
-    ) {
-        if (
-            address(_airlock) != address(0) || 
-            address(_airlockMultisig) != address(0) || 
-            address(_marketSunsetter) != address(0)
-        ) revert NeedZero();
-    }
-
-    function initialize(address airlock_, address airlockMultisig_, address marketSunsetter_) external {
-        if (initialized) revert AlreadyInitialized();
-
-        if (
-            airlock_ == address(0) || 
-            airlockMultisig_ == address(0) || 
-            marketSunsetter_ == address(0)
-        ) revert ZeroAddress();
-        
-        airlock = airlock_;
-        airlockMultisig = airlockMultisig_;
-        marketSunsetter = marketSunsetter_;
-
-        initialized = true;
-    }
-
-    // ------------------------------------------
     //  Access Control
     // ------------------------------------------
 
@@ -104,8 +68,48 @@ contract WhitelistRegistry {
         _;
     }
 
+    modifier onlyInvoker() {
+        require(msg.sender == invoker, "Not authorized");
+        _;
+    }
+
     // ------------------------------------------
     //  Initialization
+    // ------------------------------------------
+    
+    constructor(
+        address _airlock,
+        address _airlockMultisig, 
+        address _marketSunsetter
+    ) {
+        if (
+            address(_airlock) != address(0) || 
+            address(_airlockMultisig) != address(0) || 
+            address(_marketSunsetter) != address(0)
+        ) revert NeedZero();
+
+        invoker = msg.sender;
+    }
+
+    function initialize(address airlock_, address airlockMultisig_, address marketSunsetter_) external onlyInvoker {
+        if (initialized) revert AlreadyInitialized();
+
+        if (
+            airlock_ == address(0) || 
+            airlockMultisig_ == address(0) || 
+            marketSunsetter_ == address(0)
+        ) revert ZeroAddress();
+        
+        airlock = airlock_;
+        airlockMultisig = airlockMultisig_;
+        marketSunsetter = marketSunsetter_;
+
+        initialized = true;
+        invoker = address(0);
+    }
+
+    // ------------------------------------------
+    //  Market Deployment
     // ------------------------------------------
 
     function addMarket(
@@ -133,7 +137,7 @@ contract WhitelistRegistry {
     }
 
     // ------------------------------------------
-    //  Upkeep
+    //  Market Lifecycle
     // ------------------------------------------
 
     function updateMigrationStatus(address token) external onlyAirlock {
@@ -160,7 +164,7 @@ contract WhitelistRegistry {
     }
 
     // ------------------------------------------
-    //  External View
+    //  View
     // ------------------------------------------
 
     function isMarketActive(address token) external view returns (bool) {
