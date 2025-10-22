@@ -103,31 +103,31 @@ contract UniswapV4MigratorHook is LimitOrderHook {
 
     constructor(
         IPoolManager manager,
-        UniswapV4Migrator _migrator,
-        IWhitelistRegistry _whitelistRegistry,
-        address _swapQuoter,
-        address _swapRouter,
-        address _limitRouterProxy,
-        address _rewardsTreasury,
-        address _feeRouter
+        UniswapV4Migrator migrator_,
+        IWhitelistRegistry whitelistRegistry_,
+        address swapQuoter_,
+        address swapRouter_,
+        address limitRouterProxy_,
+        address rewardsTreasury_,
+        address feeRouter_
     ) BaseHook(manager) { 
         if (
-            address(_migrator) == address(0) || 
-            address(_whitelistRegistry) == address(0) || 
-            _swapQuoter == address(0) || 
-            _swapRouter == address(0) || 
-            _limitRouterProxy == address(0) || 
-            _rewardsTreasury == address(0) || 
-            _feeRouter == address(0)
+            address(migrator_) == address(0) || 
+            address(whitelistRegistry_) == address(0) || 
+            swapQuoter_ == address(0) || 
+            swapRouter_ == address(0) || 
+            limitRouterProxy_ == address(0) || 
+            rewardsTreasury_ == address(0) || 
+            feeRouter_ == address(0)
         ) revert ZeroAddress();
 
-        migrator = address(_migrator);
-        whitelistRegistry = _whitelistRegistry;
-        swapQuoter = _swapQuoter;
-        swapRouter = _swapRouter;
-        limitRouter = _limitRouterProxy;
-        rewardsTreasury = _rewardsTreasury;
-        feeRouter = _feeRouter;
+        migrator = address(migrator_);
+        whitelistRegistry = whitelistRegistry_;
+        swapQuoter = swapQuoter_;
+        swapRouter = swapRouter_;
+        limitRouter = limitRouterProxy_;
+        rewardsTreasury = rewardsTreasury_;
+        feeRouter = feeRouter_;
 
         uint8 _dec = 8;
         if (block.chainid == 8453) {
