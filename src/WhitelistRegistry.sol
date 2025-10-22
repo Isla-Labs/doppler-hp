@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
+import { Initializable } from "@openzeppelin/proxy/utils/Initializable.sol";
+
 /**
  * @title HighPotential Whitelist Registry
  * @notice List of canonical HP markets with full lifecycle schematics
  * @author Isla Labs
  * @custom:security-contact security@islalabs.co
  */
-contract WhitelistRegistry {
-
-    bool private initialized;
-    address private invoker;
+contract WhitelistRegistry is Initializable {
 
     address public airlock;
     address public airlockMultisig;
@@ -72,44 +71,26 @@ contract WhitelistRegistry {
         _;
     }
 
-    modifier onlyInvoker() {
-        if (msg.sender != invoker) revert NotAllowed();
-        _;
-    }
-
     // ------------------------------------------
     //  Initialization
     // ------------------------------------------
-    
-    constructor(
-        address _airlock,
-        address _airlockMultisig, 
-        address _marketSunsetter
-    ) {
-        if (
-            address(_airlock) != address(0) || 
-            address(_airlockMultisig) != address(0) || 
-            address(_marketSunsetter) != address(0)
-        ) revert NeedZero();
 
-        invoker = msg.sender;
+    constructor() {
+        _disableInitializers();
     }
 
-    function initialize(address airlock_, address airlockMultisig_, address marketSunsetter_) external onlyInvoker {
-        if (initialized) revert AlreadyInitialized();
+    function initialize(address airlock_, address airlockMultisig_, address marketSunsetter_) external initializer {
+        if (msg.sender != invoker) revert NotAllowed();
 
         if (
             airlock_ == address(0) || 
             airlockMultisig_ == address(0) || 
             marketSunsetter_ == address(0)
         ) revert ZeroAddress();
-        
+
         airlock = airlock_;
         airlockMultisig = airlockMultisig_;
         marketSunsetter = marketSunsetter_;
-
-        initialized = true;
-        invoker = address(0);
     }
 
     // ------------------------------------------
