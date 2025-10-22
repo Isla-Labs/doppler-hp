@@ -67,6 +67,7 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
     event EthUsdcPoolUpdated(bytes32 oldPoolId, bytes32 newPoolId);
 
     error ZeroAddress();
+    error DepositsDisabled();
     error NotWhitelisted();
     error InvalidAmount();
     error InsufficientETH(uint256 expected, uint256 provided);
@@ -172,10 +173,8 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
     }
 
     receive() external payable {
-        if (msg.sender != address(poolManager) && msg.sender != WETH) { revert("DIRECT_ETH_DISABLED"); }
+        if (msg.sender != address(poolManager) && msg.sender != WETH) revert DepositsDisabled();
     }
-
-    fallback() external payable { revert("DIRECT_ETH_DISABLED"); }
 
     // ------------------------------------------
     //  Upkeep
