@@ -9,12 +9,12 @@ pragma solidity ^0.8.24;
  */
 contract WhitelistRegistry {
 
-    bool public initialized;
-    
     address public airlock;
     address public airlockMultisig;
     address public marketSunsetter;
-    address public invoker;
+
+    bool private initialized;
+    address private invoker;
 
     // ------------------------------------------
     //  Storage
@@ -45,31 +45,35 @@ contract WhitelistRegistry {
     event SunsetComplete(address indexed token, uint256 completedAt);
 
     error NotAllowed();
-    error ZeroAddress();
     error NeedZero();
     error AlreadyInitialized();
+    error ZeroAddress();
+    error MarketExists();
+    error UnknownToken();
+    error AlreadyInactive();
+    error AlreadyMigrated();
 
     // ------------------------------------------
     //  Access Control
     // ------------------------------------------
 
     modifier onlyAirlock() {
-        require(msg.sender == airlock, "Not authorized");
+        if (msg.sender != airlock) revert NotAllowed();
         _;
     }
     
     modifier onlyAirlockMultisig() {
-        require(msg.sender == airlockMultisig, "Not authorized");
+        if (msg.sender != airlockMultisig) revert NotAllowed();
         _;
     }
 
     modifier onlyMarketSunsetter() {
-        require(msg.sender == marketSunsetter, "Not authorized");
+        if (msg.sender != marketSunsetter) revert NotAllowed();
         _;
     }
 
     modifier onlyInvoker() {
-        require(msg.sender == invoker, "Not authorized");
+        if (msg.sender != invoker) revert NotAllowed();
         _;
     }
 
@@ -118,9 +122,13 @@ contract WhitelistRegistry {
         address dopplerHook,
         address migratorHook
     ) external onlyAirlockMultisig {
-        require(tokenSets[token].token == address(0), "Market exists");
-        require(token != address(0) && vault != address(0), "Zero address");
-        require(dopplerHook != address(0) && migratorHook != address(0), "Zero address");
+        if (
+            token == address(0) || 
+            vault == address(0) || 
+            dopplerHook == address(0) || 
+            migratorHook == address(0)
+        ) revert ZeroAddress();
+        if (tokenSets[token].token != address(0)) revert MarketExists();
 
         tokenSets[token] = TokenSet({
             token: token,
@@ -143,8 +151,8 @@ contract WhitelistRegistry {
     function updateMigrationStatus(address token) external onlyAirlock {
         TokenSet storage ts = tokenSets[token];
 
-        require(ts.token != address(0), "Unknown token");
-        require(!ts.hasMigrated, "Already migrated");
+        if (ts.token == address(0)) revert UnknownToken();
+        if (ts.hasMigrated) revert AlreadyMigrated();
 
         ts.hasMigrated = true;
 
@@ -154,8 +162,8 @@ contract WhitelistRegistry {
     function discontinueMarket(address token) external onlyMarketSunsetter {
         TokenSet storage ts = tokenSets[token];
 
-        require(ts.token != address(0), "Unknown token");
-        require(ts.isActive, "Already inactive");
+        if (ts.token == address(0)) revert UnknownToken();
+        if (!ts.isActive) revert AlreadyInactive();
 
         ts.isActive = false;
         ts.deactivatedAt = block.timestamp;
