@@ -379,7 +379,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     /**
      * @notice Get tier parameters based on USD volume
      * @dev Returns static variables from cache so that volume (v) is the only dynamic input
-     * @param volumeUsd Volume in USD (optionally pre-converted for stable fee tiers)
+     * @param volumeUsd Volume in USD (pre-converted for stable fee tiers)
      * @return alpha Decay factor for fee tier
      * @return vStartUsd Starting volume threshold for fee tier
      * @return feeStart Precomputed fee (bps) at vStartUsd for fee tier
