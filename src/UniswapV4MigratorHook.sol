@@ -382,7 +382,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
      * @param volumeUsd Volume in USD
      * @return alpha Decay factor for fee tier
      * @return vStartUsd Starting volume threshold for fee tier
-     * @return feeStart Precomputed fee (bps) at starting volume threshold (v_start/vStartUsd) for fee tier
+     * @return feeStart Precomputed fee (bps) at v_start for fee tier
      */
     function _getTierParameters(uint256 volumeUsd) internal pure returns (uint256 alpha, uint256 vStartUsd, uint256 feeStart) {
         if (volumeUsd <= TIER_2_THRESHOLD_USD) return (ALPHA_TIER_1, TIER_1_THRESHOLD_USD, FEE_START_TIER_1);
