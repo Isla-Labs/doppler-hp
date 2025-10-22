@@ -47,9 +47,8 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
 
     /// @notice Pairs
     address public ETH;
-    address public WETH;
     address public USDC;
-    address public USDT;
+    address public WETH;
 
     /// @notice Migrated playerToken pool params
     uint24 public constant migratorFee = 1000;
@@ -61,19 +60,11 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
     uint24 public ethUsdcFee;
     int24 public ethUsdcTickSpacing;
 
-    /// @notice Updateable USDC/USDT pool params (derived from poolId)
-    bytes32 public usdcUsdtPoolId;
-    address public usdcUsdtBase;
-    address public usdcUsdtQuote;
-    uint24 public usdcUsdtFee;
-    int24 public usdcUsdtTickSpacing;
-
     // ------------------------------------------
     //  Events/Errors
     // ------------------------------------------
 
     event EthUsdcPoolUpdated(bytes32 oldPoolId, bytes32 newPoolId);
-    event UsdcUsdtPoolUpdated(bytes32 oldPoolId, bytes32 newPoolId);
 
     error ZeroAddress();
     error NotWhitelisted();
@@ -82,8 +73,7 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
     error Slippage();
     error TxExpired();
     error BadEthUsdcBinding(bytes32 poolId, address currency0, address currency1, address hook);
-    error BadUsdcUsdtBinding(bytes32 poolId, address currency0, address currency1, address hook);
-    error InterimPoolUnavailable();
+    error EthUsdcPoolUnavailable();
     error Unauthorized();
 
     // ------------------------------------------
@@ -114,110 +104,70 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
     }
 
     function initialize(
-        IPoolManager poolManager_,
-        IWhitelistRegistry registry_,
-        address orchestratorProxy_,
-        address limitRouterProxy_,
-        address positionManager_,
-        bytes32 ethUsdcPoolId_,
-        bytes32 usdcUsdtPoolId_
+        IPoolManager _poolManager,
+        IWhitelistRegistry _registry,
+        address _orchestratorProxy,
+        address _limitRouterProxy,
+        address _positionManager,
+        bytes32 _ethUsdcPoolId
     ) external initializer {
         if (
-            address(poolManager_) == address(0) || 
-            address(registry_) == address(0) || 
-            orchestratorProxy_ == address(0) || 
-            limitRouterProxy_ == address(0) || 
-            positionManager_ == address(0)
+            address(_poolManager) == address(0) || 
+            address(_registry) == address(0) || 
+            _orchestratorProxy == address(0) || 
+            _limitRouterProxy == address(0) || 
+            _positionManager == address(0)
         ) revert ZeroAddress();
 
-        _init(
-            poolManager_, 
-            registry_, 
-            orchestratorProxy_, 
-            limitRouterProxy_, 
-            positionManager_, 
-            ethUsdcPoolId_, 
-            usdcUsdtPoolId_
-        );
+        _init(_poolManager, _registry, _orchestratorProxy, _limitRouterProxy, _positionManager, _ethUsdcPoolId);
     }
 
     function _init(
-        IPoolManager poolManager_,
-        IWhitelistRegistry registry_,
-        address orchestratorProxy_,
-        address limitRouterProxy_,
-        address positionManager_,
-        bytes32 ethUsdcPoolId_,
-        bytes32 usdcUsdtPoolId_
+        IPoolManager _poolManager,
+        IWhitelistRegistry _registry,
+        address _orchestratorProxy,
+        address _limitRouterProxy,
+        address _positionManager,
+        bytes32 _ethUsdcPoolId
     ) private {
-        poolManager = poolManager_;
-        registry = registry_;
-        orchestratorProxy = orchestratorProxy_;
-        limitRouter = limitRouterProxy_;
-        positionManager = positionManager_;
+        poolManager = _poolManager;
+        registry = _registry;
+        orchestratorProxy = _orchestratorProxy;
+        limitRouter = _limitRouterProxy;
+        positionManager = _positionManager;
         
         ETH = address(0);
         WETH = 0x4200000000000000000000000000000000000006;
         PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
         if (block.chainid == 8453) {
-            // Base mainnet
-            USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
-            USDT = 0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2;
+            USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913; // Base mainnet
         } else if (block.chainid == 84532) {
-            // Base Sepolia
-            USDC = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
-            USDT = 0xdeaDDeADDEaDdeaDdEAddEADDEAdDeadDEADDEaD;
+            USDC = 0x036CbD53842c5426634e7929541eC2318f3dCF7e; // Base Sepolia
         } else {
-            revert InterimPoolUnavailable();
+            revert EthUsdcPoolUnavailable();
         }
 
-        if (ethUsdcPoolId_ != bytes32(0)) {
+        if (_ethUsdcPoolId != bytes32(0)) {
             (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
-                IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
+                IPositionManager(positionManager).poolKeys(_ethUsdcPoolId);
 
             address c0a = Currency.unwrap(c0);
             address c1a = Currency.unwrap(c1);
             if (!(c1a == USDC && address(h) == address(0) && (c0a == ETH || c0a == WETH))) {
-                revert BadEthUsdcBinding(ethUsdcPoolId_, c0a, c1a, address(h));
+                revert BadEthUsdcBinding(_ethUsdcPoolId, c0a, c1a, address(h));
             }
 
             ethUsdcBase = c0a;
             ethUsdcFee = fee;
             ethUsdcTickSpacing = spacing;
-            ethUsdcPoolId = ethUsdcPoolId_;
-
+            ethUsdcPoolId = _ethUsdcPoolId;
+            
         } else {
             ethUsdcBase = address(0);
             ethUsdcFee = 0;
             ethUsdcTickSpacing = 0;
             ethUsdcPoolId = bytes32(0);
-        }
-
-        if (usdcUsdtPoolId_ != bytes32(0)) {
-            (Currency s0, Currency s1, uint24 sFee, int24 sSpacing, IHooks sH) =
-                IPositionManager(positionManager).poolKeys(usdcUsdtPoolId_);
-
-            address s0a = Currency.unwrap(s0);
-            address s1a = Currency.unwrap(s1);
-            bool okPair = (address(sH) == address(0)) &&
-                ((s0a == USDC && s1a == USDT) || (s0a == USDT && s1a == USDC));
-            if (!okPair) {
-                revert BadUsdcUsdtBinding(usdcUsdtPoolId_, s0a, s1a, address(sH));
-            }
-
-            usdcUsdtBase = s0a;
-            usdcUsdtQuote = s1a;
-            usdcUsdtFee = sFee;
-            usdcUsdtTickSpacing = sSpacing;
-            usdcUsdtPoolId = usdcUsdtPoolId_;
-
-        } else {
-            usdcUsdtBase = address(0);
-            usdcUsdtQuote = address(0);
-            usdcUsdtFee = 0;
-            usdcUsdtTickSpacing = 0;
-            usdcUsdtPoolId = bytes32(0);
         }
     }
 
@@ -233,7 +183,7 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
 
     /// @notice Enables updateable eth/usdc pool parameters
     function rebindEthUsdc(bytes32 newPoolId) external onlyOrchestrator {
-        if (newPoolId == bytes32(0)) revert InterimPoolUnavailable();
+        if (newPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
         if (newPoolId == ethUsdcPoolId) return;
 
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
@@ -253,33 +203,6 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
         ethUsdcPoolId = newPoolId;
 
         emit EthUsdcPoolUpdated(oldId, newPoolId);
-    }
-
-    /// @notice Enables updateable usdc/usdt pool parameters
-    function rebindUsdcUsdt(bytes32 newPoolId) external onlyOrchestrator {
-        if (newPoolId == bytes32(0)) revert InterimPoolUnavailable();
-        if (newPoolId == usdcUsdtPoolId) return;
-
-        (Currency s0, Currency s1, uint24 sFee, int24 sSpacing, IHooks sH) =
-            IPositionManager(positionManager).poolKeys(newPoolId);
-
-        address s0a = Currency.unwrap(s0);
-        address s1a = Currency.unwrap(s1);
-        bool okPair = (address(sH) == address(0)) &&
-            ((s0a == USDC && s1a == USDT) || (s0a == USDT && s1a == USDC));
-        if (!okPair) {
-            revert BadUsdcUsdtBinding(newPoolId, s0a, s1a, address(sH));
-        }
-
-        bytes32 oldId = usdcUsdtPoolId;
-
-        usdcUsdtBase = s0a;
-        usdcUsdtQuote = s1a;
-        usdcUsdtFee = sFee;
-        usdcUsdtTickSpacing = sSpacing;
-        usdcUsdtPoolId = newPoolId;
-
-        emit UsdcUsdtPoolUpdated(oldId, newPoolId);
     }
 
     // ------------------------------------------
@@ -315,8 +238,6 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
     ) external payable checkDeadline(deadline) nonReentrant returns (SwapResult memory res) {
         if (amountIn == 0) revert InvalidAmount();
         if (inputToken == ETH && msg.value < amountIn) revert InsufficientETH(amountIn, msg.value);
-        if ((inputToken == USDC || outputToken == USDC) && ethUsdcPoolId == bytes32(0)) revert InterimPoolUnavailable();
-        if ((inputToken == USDT || outputToken == USDT) && (usdcUsdtPoolId == bytes32(0) || ethUsdcPoolId == bytes32(0))) revert InterimPoolUnavailable();
 
         bytes memory ret = poolManager.unlock(
             abi.encode(SwapCtx({
@@ -357,19 +278,13 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
 
         bool inIsPT = _isPlayerToken(inputToken);
         bool outIsPT = _isPlayerToken(outputToken);
-
         bool inIsETH = (inputToken == ETH);
         bool outIsETH = (outputToken == ETH);
-        bool inIsWETH = (inputToken == WETH);
-        bool outIsWETH = (outputToken == WETH);
-
         bool inIsUSDC = (inputToken == USDC);
         bool outIsUSDC = (outputToken == USDC);
-        bool inIsUSDT = (inputToken == USDT);
-        bool outIsUSDT = (outputToken == USDT);
 
-        bool inIsStable = inIsUSDC || inIsUSDT;
-        bool outIsStable = outIsUSDC || outIsUSDT;
+        bool inIsWETH = (inputToken == WETH);
+        bool outIsWETH = (outputToken == WETH);
         bool inIsETHish = inIsETH || inIsWETH;
         bool outIsETHish = outIsETH || outIsWETH;
 
@@ -451,9 +366,11 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
                 res.totalFeesEth += _feeOnEthInput(amountIn, 300);
             }
 
-        } else if (inIsPT && outIsStable) {
+        } else if (inIsPT && outIsUSDC) {
+            if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
+
             (PoolKey memory keyIn, bool migratedIn) = _playerPoolKey(inputToken);
-            PoolKey memory keyEthUsdc = _ethUsdcKey();
+            PoolKey memory keyMid = _ethUsdcKey();
 
             _settleExactIn(Currency.wrap(inputToken), amountIn);
             _swapExactIn(keyIn, /*zeroForOne*/ false, amountIn, bytes(""));
@@ -474,71 +391,24 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
                     IERC20(WETH).safeTransfer(address(poolManager), ethInterim);
                     poolManager.settle();
                 }
-                _swapExactIn(keyEthUsdc, /*zeroForOne*/ true, ethInterim, bytes(""));
+                _swapExactIn(keyMid, /*zeroForOne*/ true, ethInterim, bytes(""));
             }
 
-            uint256 usdcInterim = _managerOwed(Currency.wrap(USDC));
-
-            if (outIsUSDT) {
-                PoolKey memory keyUsdcUsdt = _usdcUsdtKey();
-                
-                if (usdcInterim > 0) {
-                    bool zfStable = (usdcUsdtBase == USDC);
-                    _swapExactIn(keyUsdcUsdt, /*zeroForOne*/ zfStable, usdcInterim, bytes(""));
-                }
-
-                {
-                    uint256 stableFeeBps = _v4FeeBps(usdcUsdtFee);
-                    uint256 stableFee = _feeOnUsdcInput(usdcInterim, stableFeeBps);
-                    uint256 ethPriceUsd2 = _ethPriceUsdFromToken(inputToken);
-                    if (ethPriceUsd2 != 0) {
-                        uint256 stableFeeAsEth = (stableFee * 1e18) / ethPriceUsd2;
-                        res.totalFeesEth += stableFeeAsEth;
-                    }
-                }
-
-                res.amountOut = _managerOwed(Currency.wrap(USDT));
-                if (res.amountOut != 0) poolManager.take(Currency.wrap(USDT), recipient, res.amountOut);
-            } else {
-                res.amountOut = usdcInterim;
-                if (res.amountOut != 0) poolManager.take(Currency.wrap(USDC), recipient, res.amountOut);
-            }
+            res.amountOut = _managerOwed(Currency.wrap(USDC));
+            if (res.amountOut != 0) poolManager.take(Currency.wrap(USDC), recipient, res.amountOut);
 
             if (ethInterim > 0) {
                 res.totalFeesEth += _feeOnEthInput(ethInterim, _v4FeeBps(ethUsdcFee));
             }
 
-        } else if (outIsPT && inIsStable) {
-            PoolKey memory keyEthUsdc = _ethUsdcKey();
+        } else if (outIsPT && inIsUSDC) {
+            if (ethUsdcPoolId == bytes32(0)) revert EthUsdcPoolUnavailable();
+
+            PoolKey memory keyMid = _ethUsdcKey();
             (PoolKey memory keyOut, bool migratedOut) = _playerPoolKey(outputToken);
 
-            uint256 usdcIn;
-            if (inIsUSDC) {
-                _settleExactIn(Currency.wrap(USDC), amountIn);
-                usdcIn = amountIn;
-            } else {
-                _settleExactIn(Currency.wrap(USDT), amountIn);
-                PoolKey memory keyUsdcUsdt = _usdcUsdtKey();
-
-                bool zfStable = (usdcUsdtBase == USDT);
-                _swapExactIn(keyUsdcUsdt, /*zeroForOne*/ zfStable, amountIn, bytes(""));
-
-                {
-                    uint256 stableFeeBps = _v4FeeBps(usdcUsdtFee);
-                    uint256 stableFee = _feeOnUsdcInput(amountIn, stableFeeBps);
-                    uint256 ethPriceUsd3 = _ethPriceUsdFromToken(outputToken);
-                    if (ethPriceUsd3 != 0) {
-                        uint256 stableFeeAsEth = (stableFee * 1e18) / ethPriceUsd3;
-                        res.totalFeesEth += stableFeeAsEth;
-                    }
-                }
-
-                usdcIn = _managerOwed(Currency.wrap(USDC));
-            }
-
-            if (usdcIn > 0) {
-                _swapExactIn(keyEthUsdc, /*zeroForOne*/ false, usdcIn, bytes(""));
-            }
+            _settleExactIn(Currency.wrap(USDC), amountIn);
+            _swapExactIn(keyMid, /*zeroForOne*/ false, amountIn, bytes(""));
 
             uint256 ethInterim;
             if (ethUsdcBase == WETH) {
@@ -554,7 +424,7 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
             }
 
             {
-                uint256 usdcFee = _feeOnUsdcInput(usdcIn, _v4FeeBps(ethUsdcFee));
+                uint256 usdcFee = _feeOnUsdcInput(amountIn, _v4FeeBps(ethUsdcFee));
                 uint256 ethPriceUsd = _ethPriceUsdFromToken(outputToken);
                 if (ethPriceUsd != 0) {
                     uint256 usdcFeeAsEth = (usdcFee * 1e18) / ethPriceUsd;
@@ -741,17 +611,6 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
             hooks: IHooks(address(0)),
             fee: ethUsdcFee,
             tickSpacing: ethUsdcTickSpacing
-        });
-    }
-
-    /// @notice Automatically construct poolKey for USDC/USDT (derived from Uniswap v4 poolId)
-    function _usdcUsdtKey() internal view returns (PoolKey memory key) {
-        key = PoolKey({
-            currency0: Currency.wrap(usdcUsdtBase),
-            currency1: Currency.wrap(usdcUsdtQuote),
-            hooks: IHooks(address(0)),
-            fee: usdcUsdtFee,
-            tickSpacing: usdcUsdtTickSpacing
         });
     }
 }
