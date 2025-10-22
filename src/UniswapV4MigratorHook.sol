@@ -143,15 +143,6 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         feedDecimals = _dec;
     }
 
-    // For buy-side ETH limit orders (onlyLimitRouter)
-    receive() external payable {
-        if (msg.sender != limitRouter) revert DepositsDisabled();
-    }
-
-    fallback() external payable {
-        revert DepositsDisabled();
-    }
-
     // ------------------------------------------
     //  Hook Functions
     // ------------------------------------------
