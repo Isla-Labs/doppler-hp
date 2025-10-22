@@ -81,37 +81,37 @@ contract HPSwapQuoter is Initializable {
     }
 
     function initialize(
-        IPoolManager _poolManager,
-        IWhitelistRegistry _registry,
-        IV4Quoter _quoter,
-        address _orchestratorProxy,
-        address _positionManager,
-        bytes32 _ethUsdcPoolId
+        IPoolManager poolManager_,
+        IWhitelistRegistry registry_,
+        IV4Quoter quoter_,
+        address orchestratorProxy_,
+        address positionManager_,
+        bytes32 ethUsdcPoolId_
     ) external initializer {
         if (
-            address(_poolManager) == address(0) || 
-            address(_registry) == address(0) || 
-            address(_quoter) == address(0) || 
-            _orchestratorProxy == address(0) || 
-            _positionManager == address(0)
+            address(poolManager_) == address(0) || 
+            address(registry_) == address(0) || 
+            address(quoter_) == address(0) || 
+            orchestratorProxy_ == address(0) || 
+            positionManager_ == address(0)
         ) revert ZeroAddress();
 
-        _init(_poolManager, _registry, _quoter, _orchestratorProxy, _positionManager, _ethUsdcPoolId);
+        _init(poolManager_, registry_, quoter_, orchestratorProxy_, positionManager_, ethUsdcPoolId_);
     }
 
     function _init(
-        IPoolManager _poolManager,
-        IWhitelistRegistry _registry,
-        IV4Quoter _quoter,
-        address _orchestratorProxy,
-        address _positionManager,
-        bytes32 _ethUsdcPoolId
+        IPoolManager poolManager_,
+        IWhitelistRegistry registry_,
+        IV4Quoter quoter_,
+        address orchestratorProxy_,
+        address positionManager_,
+        bytes32 ethUsdcPoolId_
     ) private {
-        poolManager = _poolManager;
-        registry = _registry;
-        quoter = _quoter;
-        orchestratorProxy = _orchestratorProxy;
-        positionManager = _positionManager;
+        poolManager = poolManager_;
+        registry = registry_;
+        quoter = quoter_;
+        orchestratorProxy = orchestratorProxy_;
+        positionManager = positionManager_;
 
         ETH = address(0);
         WETH = 0x4200000000000000000000000000000000000006;
@@ -124,21 +124,21 @@ contract HPSwapQuoter is Initializable {
             revert EthUsdcPoolUnavailable();
         }
 
-        if (_ethUsdcPoolId != bytes32(0)) {
+        if (ethUsdcPoolId_ != bytes32(0)) {
             (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
-                IPositionManager(positionManager).poolKeys(_ethUsdcPoolId);
+                IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
 
             address c0a = Currency.unwrap(c0);
             address c1a = Currency.unwrap(c1);
             if (!(c1a == USDC && address(h) == address(0) && (c0a == ETH || c0a == WETH))) {
-                revert BadEthUsdcBinding(_ethUsdcPoolId, c0a, c1a, address(h));
+                revert BadEthUsdcBinding(ethUsdcPoolId_, c0a, c1a, address(h));
             }
             
             ethUsdcBase = c0a;
             ethUsdcFee = fee;
             ethUsdcTickSpacing = spacing;
-            ethUsdcPoolId = _ethUsdcPoolId;
-            
+            ethUsdcPoolId = ethUsdcPoolId_;
+
         } else {
             ethUsdcBase = address(0);
             ethUsdcFee = 0;

@@ -104,37 +104,37 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
     }
 
     function initialize(
-        IPoolManager _poolManager,
-        IWhitelistRegistry _registry,
-        address _orchestratorProxy,
-        address _limitRouterProxy,
-        address _positionManager,
-        bytes32 _ethUsdcPoolId
+        IPoolManager poolManager_,
+        IWhitelistRegistry registry_,
+        address orchestratorProxy_,
+        address limitRouterProxy_,
+        address positionManager_,
+        bytes32 ethUsdcPoolId_
     ) external initializer {
         if (
-            address(_poolManager) == address(0) || 
-            address(_registry) == address(0) || 
-            _orchestratorProxy == address(0) || 
-            _limitRouterProxy == address(0) || 
-            _positionManager == address(0)
+            address(poolManager_) == address(0) || 
+            address(registry_) == address(0) || 
+            orchestratorProxy_ == address(0) || 
+            limitRouterProxy_ == address(0) || 
+            positionManager_ == address(0)
         ) revert ZeroAddress();
 
-        _init(_poolManager, _registry, _orchestratorProxy, _limitRouterProxy, _positionManager, _ethUsdcPoolId);
+        _init(poolManager_, registry_, orchestratorProxy_, limitRouterProxy_, positionManager_, ethUsdcPoolId_);
     }
 
     function _init(
-        IPoolManager _poolManager,
-        IWhitelistRegistry _registry,
-        address _orchestratorProxy,
-        address _limitRouterProxy,
-        address _positionManager,
-        bytes32 _ethUsdcPoolId
+        IPoolManager poolManager_,
+        IWhitelistRegistry registry_,
+        address orchestratorProxy_,
+        address limitRouterProxy_,
+        address positionManager_,
+        bytes32 ethUsdcPoolId_
     ) private {
-        poolManager = _poolManager;
-        registry = _registry;
-        orchestratorProxy = _orchestratorProxy;
-        limitRouter = _limitRouterProxy;
-        positionManager = _positionManager;
+        poolManager = poolManager_;
+        registry = registry_;
+        orchestratorProxy = orchestratorProxy_;
+        limitRouter = limitRouterProxy_;
+        positionManager = positionManager_;
         
         ETH = address(0);
         WETH = 0x4200000000000000000000000000000000000006;
@@ -148,20 +148,20 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
             revert EthUsdcPoolUnavailable();
         }
 
-        if (_ethUsdcPoolId != bytes32(0)) {
+        if (ethUsdcPoolId_ != bytes32(0)) {
             (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) =
-                IPositionManager(positionManager).poolKeys(_ethUsdcPoolId);
+                IPositionManager(positionManager).poolKeys(ethUsdcPoolId_);
 
             address c0a = Currency.unwrap(c0);
             address c1a = Currency.unwrap(c1);
             if (!(c1a == USDC && address(h) == address(0) && (c0a == ETH || c0a == WETH))) {
-                revert BadEthUsdcBinding(_ethUsdcPoolId, c0a, c1a, address(h));
+                revert BadEthUsdcBinding(ethUsdcPoolId_, c0a, c1a, address(h));
             }
 
             ethUsdcBase = c0a;
             ethUsdcFee = fee;
             ethUsdcTickSpacing = spacing;
-            ethUsdcPoolId = _ethUsdcPoolId;
+            ethUsdcPoolId = ethUsdcPoolId_;
             
         } else {
             ethUsdcBase = address(0);
