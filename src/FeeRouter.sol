@@ -32,8 +32,8 @@ contract FeeRouter is ReentrancyGuard {
     // ------------------------------------------
 
     event RecipientsUpdated(address[] recipients, uint16[] bps);
+    event FeesReceived(address indexed from, uint256 amount);
     event FeesDistributed(uint256 amount, uint256 nRecipients);
-    event Recovered(address indexed to, uint256 amount, address token);
     event ApproveFailed(address indexed token, address indexed spender, uint256 amount);
     event SwapFailed(address indexed tokenIn, address indexed tokenOut, uint256 amountIn);
     event ForwardingFailed(address indexed to, address asset, uint256 amount);
@@ -101,7 +101,47 @@ contract FeeRouter is ReentrancyGuard {
         _setRecipients(recipients_, recipientsBps_);
      }
 
-    receive() external payable {}
+    receive() external payable { emit FeesReceived(msg.sender, msg.value); }
+
+    // ------------------------------------------
+    //  Standard Fee Distribution
+    // ------------------------------------------
+
+    /**
+     * @notice Enables recipients to sweep feeRouter for remaining 11% split
+     * @dev Bonding fees are ephemeral for currency0 so remaining ETH balance should be absolute;
+     *      playerToken balances are automatically swept during migration
+     * @param amount Total ETH to distribute in wei (amount=0 for full balance)
+     */
+    function distribute(uint256 amount) external onlyOrchestrator nonReentrant {
+        uint256 bal = address(this).balance;
+        uint256 toDistribute = amount == 0 ? bal : amount;
+
+        uint256 minAmt = (bal * MIN_DISTRIBUTE_BPS) / BPS;
+        if (toDistribute != 0 && toDistribute < minAmt) {
+            toDistribute = minAmt;
+        }
+
+        if (toDistribute > bal) revert InsufficientBalance(amount, bal);
+
+        uint256 n = recipients.length;
+        if (n == 0) revert NoRecipients();
+
+        uint256 sent;
+        for (uint256 i; i < n; ++i) {
+            address to = recipients[i];
+            uint256 bps = recipientsBps[i];
+
+            uint256 share = (toDistribute * bps) / BPS;
+            sent += share;
+            if (i == n - 1) share = toDistribute - (sent - share);
+            (bool ok, ) = to.call{ value: share }("");
+
+            if (!ok) revert TransferFailed(to, share);
+        }
+
+        emit FeesDistributed(toDistribute, n);
+    }
 
     // ------------------------------------------
     //  Bonding Fee Routing
@@ -188,46 +228,6 @@ contract FeeRouter is ReentrancyGuard {
                 }
             }
         }
-    }
-
-    // ------------------------------------------
-    //  Standard Fee Distribution
-    // ------------------------------------------
-
-    /**
-     * @notice Enables recipients to sweep feeRouter for remaining 11% split
-     * @dev Bonding fees are ephemeral for currency0 so remaining ETH balance should be absolute;
-     *      playerToken balances are automatically swept during migration
-     * @param amount Total ETH to distribute in wei (amount=0 for full balance)
-     */
-    function distribute(uint256 amount) external onlyOrchestrator nonReentrant {
-        uint256 bal = address(this).balance;
-        uint256 toDistribute = amount == 0 ? bal : amount;
-
-        uint256 minAmt = (bal * MIN_DISTRIBUTE_BPS) / BPS;
-        if (toDistribute != 0 && toDistribute < minAmt) {
-            toDistribute = minAmt;
-        }
-
-        if (toDistribute > bal) revert InsufficientBalance(amount, bal);
-
-        uint256 n = recipients.length;
-        if (n == 0) revert NoRecipients();
-
-        uint256 sent;
-        for (uint256 i; i < n; ++i) {
-            address to = recipients[i];
-            uint256 bps = recipientsBps[i];
-
-            uint256 share = (toDistribute * bps) / BPS;
-            sent += share;
-            if (i == n - 1) share = toDistribute - (sent - share);
-            (bool ok, ) = to.call{ value: share }("");
-
-            if (!ok) revert TransferFailed(to, share);
-        }
-
-        emit FeesDistributed(toDistribute, n);
     }
 
     // ------------------------------------------
