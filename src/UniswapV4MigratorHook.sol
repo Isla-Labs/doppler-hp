@@ -75,8 +75,6 @@ contract UniswapV4MigratorHook is LimitOrderHook {
 
     event Swap(address indexed token, uint256 sqrtPriceX96);
 
-    error OnlyMigrator();
-    error OnlyLimitRouter();
     error ZeroAddress();
     error NotAllowed();
     error MarketSunset();
@@ -90,12 +88,12 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     // ------------------------------------------
 
     modifier onlyMigrator(address sender) {
-        if (sender != migrator) revert OnlyMigrator();
+        if (sender != migrator) revert NotAllowed();
         _;
     }
 
     modifier onlyLimitRouter() {
-        if (msg.sender != limitRouter) revert OnlyLimitRouter();
+        if (msg.sender != limitRouter) revert NotAllowed();
         _;
     }
 
