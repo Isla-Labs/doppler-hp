@@ -80,7 +80,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     error MarketSunset();
     error OnlyBuys();
     error OnlySells();
-    error NeedsUser();
+    error NoSender();
     error DepositsDisabled();
 
     // ------------------------------------------
@@ -265,7 +265,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         if (zeroForOne) revert OnlySells();
 
         address sender = _msgSenderEx();
-        if (sender == address(0) || sender == limitRouter) revert NeedsUser();
+        if (sender == address(0) || sender == limitRouter) revert NoSender();
 
         _placeOrder(key, tick, zeroForOne, liquidity, sender);
     }
@@ -281,7 +281,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
 
         // Resolve end-user
         address sender = _msgSenderEx();
-        if (sender == address(0) || sender == limitRouter) revert NeedsUser();
+        if (sender == address(0) || sender == limitRouter) revert NoSender();
 
         // Budget is the ETH forwarded by the router in this call (already incorporates headroom)
         uint256 budget = msg.value;
@@ -312,7 +312,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         address to
     ) public override onlyLimitRouter {
         address sender = _msgSenderEx();
-        if (sender == address(0) || sender == limitRouter) revert NeedsUser();
+        if (sender == address(0) || sender == limitRouter) revert NoSender();
 
         to = sender;
         _cancelOrder(key, tickLower, zeroForOne, to, sender);
@@ -324,7 +324,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         address to
     ) public override onlyLimitRouter returns (uint256 amount0, uint256 amount1) {
         address sender = _msgSenderEx();
-        if (sender == address(0) || sender == limitRouter) revert NeedsUser();
+        if (sender == address(0) || sender == limitRouter) revert NoSender();
 
         to = limitRouter;
         return _withdraw(orderId, to, sender);
