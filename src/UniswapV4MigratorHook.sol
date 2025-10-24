@@ -161,31 +161,17 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         SwapParams calldata swapParams,
         bytes calldata
     ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
-        // Dynamic fee on buys (ETH -> playerToken)
+        // Dynamic fee on exact-input buys (ETH -> playerToken)
         if (swapParams.zeroForOne) {
-            // Market status check
             if (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1))) revert MarketSunset();
 
-            // Apply dynamic fee on ETH input
-            uint256 inputAmount = uint256(swapParams.amountSpecified < 0 
-                ? -swapParams.amountSpecified 
-                : swapParams.amountSpecified);
-            uint256 dynamicFeeBps = _calculateDynamicFee(inputAmount);
+            if (swapParams.amountSpecified < 0) {
+                return (BaseHook.beforeSwap.selector, toBeforeSwapDelta(0, 0), 0);
+            }
 
-            // Re-route and update delta
-            if (dynamicFeeBps > 0) {
-                uint256 totalFeeAmount = (inputAmount * dynamicFeeBps) / BPS;
-
-                // Split fees 89:11 for PBR
-                uint256 rewardsAmount = (totalFeeAmount * PBR_BPS) / BPS;
-                uint256 feeAmount = totalFeeAmount - rewardsAmount;
-
-                // Transfer via PoolManager
-                poolManager().take(key.currency0, rewardsTreasury, rewardsAmount);
-                poolManager().take(key.currency0, feeRouter, feeAmount);
-
-                // Return delta to account for fees taken
-                return (BaseHook.beforeSwap.selector, toBeforeSwapDelta(totalFeeAmount.toInt128(), 0), 0);
+            uint256 feeEth = _takeEthFee(key, uint256(swapParams.amountSpecified));
+            if (feeEth > 0) {
+                return (BaseHook.beforeSwap.selector, toBeforeSwapDelta(feeEth.toInt128(), 0), 0);
             }
         }
 
@@ -207,38 +193,22 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         (uint160 sqrtPriceX96,,,) = poolManager().getSlot0(key.toId());
         emit Swap(Currency.unwrap(key.currency1), sqrtPriceX96);
 
-        // Dynamic fee on sells (playerToken -> ETH)
-        if (!swapParams.zeroForOne) {
-            // Decode multi-hop context
-            SwapContext memory ctx = _decodeHookData(hookData);
+        // Dynamic fee on exact-output buys (ETH -> playerToken)
+        if (swapParams.zeroForOne && swapParams.amountSpecified < 0) {
+            if (_shouldSkipFee(sender, key, hookData)) return (BaseHook.afterSwap.selector, 0);
 
-            // Check market status, skip fee on multihops & limit withdrawals
-            if (
-                ((sender == swapRouter || sender == swapQuoter) && ctx.skipFee) ||
-                (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1)))
-            ) {
-                return (BaseHook.afterSwap.selector, 0);
-            }
-
-            // Apply dynamic fee on ETH output
-            uint256 outputAmount = delta.amount0() < 0
-                ? uint256(uint128(-delta.amount0()))
-                : uint256(uint128(delta.amount0()));
-            uint256 dynamicFeeBps = _calculateDynamicFee(outputAmount);
-
-            // Re-route and update delta
-            if (dynamicFeeBps > 0) {
-                uint256 totalFeeAmount = (outputAmount * dynamicFeeBps) / BPS;
-                uint256 rewardsAmount = (totalFeeAmount * PBR_BPS) / BPS;
-                uint256 feeAmount = totalFeeAmount - rewardsAmount;
-
-                poolManager().take(key.currency0, rewardsTreasury, rewardsAmount);
-                poolManager().take(key.currency0, feeRouter, feeAmount);
-
-                return (BaseHook.afterSwap.selector, totalFeeAmount.toInt128());
-            }
+            uint256 feeEth = _takeEthFee(key, _absDelta0(delta));
+            if (feeEth > 0) return (BaseHook.afterSwap.selector, feeEth.toInt128());
         }
 
+        // Dynamic fee on sells (playerToken -> ETH)
+        if (!swapParams.zeroForOne) {
+            if (_shouldSkipFee(sender, key, hookData)) return (BaseHook.afterSwap.selector, 0);
+
+            uint256 feeEth = _takeEthFee(key, _absDelta0(delta));
+            if (feeEth > 0) return (BaseHook.afterSwap.selector, feeEth.toInt128());
+        }
+        
         return (BaseHook.afterSwap.selector, 0);
     }
 
@@ -328,6 +298,48 @@ contract UniswapV4MigratorHook is LimitOrderHook {
 
         to = limitRouter;
         return _withdraw(orderId, to, sender);
+    }
+
+    // ------------------------------------------
+    //  Fee Settlement
+    // ------------------------------------------
+
+    /// @notice Return actual ETH value of the swap
+    function _absDelta0(BalanceDelta delta) internal pure returns (uint256) {
+        return delta.amount0() < 0
+            ? uint256(uint128(-delta.amount0()))
+            : uint256(uint128(delta.amount0()));
+    }
+
+    /// @notice Check pre-conditions for fee settlement
+    function _shouldSkipFee(address sender, PoolKey calldata key, bytes calldata hookData) internal view returns (bool) {
+        if (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1))) return true;
+
+        SwapContext memory ctx = _decodeHookData(hookData);
+        if ((sender == swapRouter || sender == swapQuoter) && ctx.skipFee) return true;
+
+        return false;
+    }
+
+    /// @notice Split fees and settle in ETH
+    function _takeEthFee(PoolKey calldata key, uint256 baseEth)
+        internal
+        returns (uint256 feeEth)
+    {
+        if (baseEth == 0) return 0;
+
+        // Apply dynamic fee on base ETH
+        uint256 feeBps = _calculateDynamicFee(baseEth);
+        if (feeBps == 0) return 0;
+        feeEth = (baseEth * feeBps) / BPS;
+
+        // Split fees 89:11 for PBR
+        uint256 rewardsAmount = (feeEth * PBR_BPS) / BPS;
+        uint256 feeAmount = feeEth - rewardsAmount;
+
+        // Transfer via PoolManager
+        poolManager().take(key.currency0, rewardsTreasury, rewardsAmount);
+        poolManager().take(key.currency0, feeRouter, feeAmount);
     }
 
     // ------------------------------------------
