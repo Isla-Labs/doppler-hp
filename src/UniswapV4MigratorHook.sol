@@ -401,13 +401,6 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         return false;
     }
 
-    /// @notice Return actual ETH value of the swap
-    function _absDelta0(BalanceDelta delta) internal pure returns (uint256) {
-        return delta.amount0() < 0
-            ? uint256(uint128(-delta.amount0()))
-            : uint256(uint128(delta.amount0()));
-    }
-
     // ------------------------------------------
     //  Internal
     // ------------------------------------------
@@ -416,6 +409,13 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     function _decodeHookData(bytes calldata hookData) private pure returns (SwapContext memory context) {
         if (hookData.length == 0) return SwapContext(false);
         return abi.decode(hookData, (SwapContext));
+    }
+
+    /// @notice Return ETH moved during the swap
+    function _absDelta0(BalanceDelta delta) internal pure returns (uint256) {
+        return delta.amount0() < 0
+            ? uint256(uint128(-delta.amount0()))
+            : uint256(uint128(delta.amount0()));
     }
 
     /// @notice Fetch ETH price (uses fallback on testnet)
