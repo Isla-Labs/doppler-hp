@@ -315,7 +315,10 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     function _shouldSkipFee(address sender, PoolKey calldata key, bytes calldata hookData) internal view returns (bool) {
         if (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1))) return true;
 
+        // Decode swap context
         SwapContext memory ctx = _decodeHookData(hookData);
+
+        // Skips sell-side fee on multihops' first-hop & limit withdrawals
         if ((sender == swapRouter || sender == swapQuoter) && ctx.skipFee) return true;
 
         return false;
@@ -330,7 +333,6 @@ contract UniswapV4MigratorHook is LimitOrderHook {
 
         // Apply dynamic fee on base ETH
         uint256 feeBps = _calculateDynamicFee(baseEth);
-        if (feeBps == 0) return 0;
         feeEth = (baseEth * feeBps) / BPS;
 
         // Split fees 89:11 for PBR
@@ -343,7 +345,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     }
 
     // ------------------------------------------
-    //  Dynamic Fee Calculation
+    //  Fee Calculation
     // ------------------------------------------
 
     /// @notice Convert ETH volume into dynamic fee bps
