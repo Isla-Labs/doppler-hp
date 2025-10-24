@@ -195,8 +195,6 @@ contract UniswapV4MigratorHook is LimitOrderHook {
 
         // Dynamic fee on exact-output buys (ETH -> playerToken)
         if (swapParams.zeroForOne && swapParams.amountSpecified < 0) {
-            if (_shouldSkipFee(sender, key, hookData)) return (BaseHook.afterSwap.selector, 0);
-
             uint256 feeEth = _takeEthFee(key, _absDelta0(delta));
             if (feeEth > 0) return (BaseHook.afterSwap.selector, feeEth.toInt128());
         }
@@ -213,7 +211,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     }
 
     // ------------------------------------------
-    //  Limit Order Access
+    //  Limit Orders
     // ------------------------------------------
 
     /// @notice Reads the appended 20 bytes from HPLimitRouter to replace msg.sender with owner address
@@ -301,50 +299,6 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     }
 
     // ------------------------------------------
-    //  Fee Settlement
-    // ------------------------------------------
-
-    /// @notice Return actual ETH value of the swap
-    function _absDelta0(BalanceDelta delta) internal pure returns (uint256) {
-        return delta.amount0() < 0
-            ? uint256(uint128(-delta.amount0()))
-            : uint256(uint128(delta.amount0()));
-    }
-
-    /// @notice Check pre-conditions for fee settlement
-    function _shouldSkipFee(address sender, PoolKey calldata key, bytes calldata hookData) internal view returns (bool) {
-        if (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1))) return true;
-
-        // Decode swap context
-        SwapContext memory ctx = _decodeHookData(hookData);
-
-        // Skips sell-side fee on limit withdrawals & first-hop of playerToken<>playerToken swaps
-        if ((sender == swapRouter || sender == swapQuoter) && ctx.skipFee) return true;
-
-        return false;
-    }
-
-    /// @notice Split fees and settle in ETH
-    function _takeEthFee(PoolKey calldata key, uint256 baseEth)
-        internal
-        returns (uint256 feeEth)
-    {
-        if (baseEth == 0) return 0;
-
-        // Apply dynamic fee on base ETH
-        uint256 feeBps = _calculateDynamicFee(baseEth);
-        feeEth = (baseEth * feeBps) / BPS;
-
-        // Split fees 89:11 for PBR
-        uint256 rewardsAmount = (feeEth * PBR_BPS) / BPS;
-        uint256 feeAmount = feeEth - rewardsAmount;
-
-        // Transfer via PoolManager
-        poolManager().take(key.currency0, rewardsTreasury, rewardsAmount);
-        poolManager().take(key.currency0, feeRouter, feeAmount);
-    }
-
-    // ------------------------------------------
     //  Fee Calculation
     // ------------------------------------------
 
@@ -414,6 +368,50 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         SD59x18 result = exp(negativeX);
 
         return uint256(result.unwrap()); // 1e18-scaled
+    }
+
+    // ------------------------------------------
+    //  Fee Settlement
+    // ------------------------------------------
+
+    /// @notice Return actual ETH value of the swap
+    function _absDelta0(BalanceDelta delta) internal pure returns (uint256) {
+        return delta.amount0() < 0
+            ? uint256(uint128(-delta.amount0()))
+            : uint256(uint128(delta.amount0()));
+    }
+
+    /// @notice Check pre-conditions for fee settlement
+    function _shouldSkipFee(address sender, PoolKey calldata key, bytes calldata hookData) internal view returns (bool) {
+        if (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1))) return true;
+
+        // Decode swap context
+        SwapContext memory ctx = _decodeHookData(hookData);
+
+        // Skips sell-side fee on limit withdrawals & first-hop of playerToken<>playerToken swaps
+        if ((sender == swapRouter || sender == swapQuoter) && ctx.skipFee) return true;
+
+        return false;
+    }
+
+    /// @notice Split fees and settle in ETH
+    function _takeEthFee(PoolKey calldata key, uint256 baseEth)
+        internal
+        returns (uint256 feeEth)
+    {
+        if (baseEth == 0) return 0;
+
+        // Apply dynamic fee on base ETH
+        uint256 feeBps = _calculateDynamicFee(baseEth);
+        feeEth = (baseEth * feeBps) / BPS;
+
+        // Split fees 89:11 for PBR
+        uint256 rewardsAmount = (feeEth * PBR_BPS) / BPS;
+        uint256 feeAmount = feeEth - rewardsAmount;
+
+        // Transfer via PoolManager
+        poolManager().take(key.currency0, rewardsTreasury, rewardsAmount);
+        poolManager().take(key.currency0, feeRouter, feeAmount);
     }
 
     // ------------------------------------------
