@@ -302,12 +302,6 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     //  Fee Calculation
     // ------------------------------------------
 
-    /// @notice Convert ETH volume into dynamic fee bps
-    function _calculateDynamicFee(uint256 volumeEth) internal view returns (uint256 feeBps) {
-        uint256 ethPriceUsd = _ethPriceUsd();
-        return _dynamicFeeCalculation(volumeEth, ethPriceUsd);
-    }
-
     /**
      * @notice Dynamic fee with exponential decay
      * @dev feeRate = min_fee + (feeRate_start - fee_min) * e^(-a * (v - v_start) / scale)
@@ -315,7 +309,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
      * @param ethPriceUsd ETH price in USD (6 decimals)
      * @return feeBps Fee in basis points
      */
-    function _dynamicFeeCalculation(uint256 volumeEth, uint256 ethPriceUsd) internal pure returns (uint256 feeBps) {
+    function _calculateDynamicFee(uint256 volumeEth, uint256 ethPriceUsd) internal pure returns (uint256 feeBps) {
         // Standardize volume (v) in usd
         uint256 volumeUsd = (volumeEth * ethPriceUsd) / (1 ether * 1e6);
 
@@ -374,11 +368,24 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     //  Fee Settlement
     // ------------------------------------------
 
-    /// @notice Return actual ETH value of the swap
-    function _absDelta0(BalanceDelta delta) internal pure returns (uint256) {
-        return delta.amount0() < 0
-            ? uint256(uint128(-delta.amount0()))
-            : uint256(uint128(delta.amount0()));
+    /// @notice Split fees and settle in ETH
+    function _takeEthFee(PoolKey calldata key, uint256 baseEth)
+        internal
+        returns (uint256 feeEth)
+    {
+        if (baseEth == 0) return 0;
+
+        // Apply dynamic fee on base ETH
+        uint256 feeBps = _calculateDynamicFee(baseEth, _ethPriceUsd());
+        feeEth = (baseEth * feeBps) / BPS;
+
+        // Split fees 89:11 for PBR
+        uint256 rewardsAmount = (feeEth * PBR_BPS) / BPS;
+        uint256 feeAmount = feeEth - rewardsAmount;
+
+        // Transfer via PoolManager
+        poolManager().take(key.currency0, rewardsTreasury, rewardsAmount);
+        poolManager().take(key.currency0, feeRouter, feeAmount);
     }
 
     /// @notice Check pre-conditions for fee settlement
@@ -394,24 +401,11 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         return false;
     }
 
-    /// @notice Split fees and settle in ETH
-    function _takeEthFee(PoolKey calldata key, uint256 baseEth)
-        internal
-        returns (uint256 feeEth)
-    {
-        if (baseEth == 0) return 0;
-
-        // Apply dynamic fee on base ETH
-        uint256 feeBps = _calculateDynamicFee(baseEth);
-        feeEth = (baseEth * feeBps) / BPS;
-
-        // Split fees 89:11 for PBR
-        uint256 rewardsAmount = (feeEth * PBR_BPS) / BPS;
-        uint256 feeAmount = feeEth - rewardsAmount;
-
-        // Transfer via PoolManager
-        poolManager().take(key.currency0, rewardsTreasury, rewardsAmount);
-        poolManager().take(key.currency0, feeRouter, feeAmount);
+    /// @notice Return actual ETH value of the swap
+    function _absDelta0(BalanceDelta delta) internal pure returns (uint256) {
+        return delta.amount0() < 0
+            ? uint256(uint128(-delta.amount0()))
+            : uint256(uint128(delta.amount0()));
     }
 
     // ------------------------------------------
@@ -483,6 +477,6 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     /// @notice Calculate dynamic fee for a given volume
     function simulateDynamicFee(uint256 volumeEth) external view returns (uint256 feeBps, uint256 ethPriceUsd) {
         ethPriceUsd = _ethPriceUsd();
-        feeBps = _dynamicFeeCalculation(volumeEth, ethPriceUsd);
+        feeBps = _calculateDynamicFee(volumeEth, ethPriceUsd);
     }
 }
