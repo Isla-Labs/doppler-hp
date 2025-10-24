@@ -318,7 +318,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         // Decode swap context
         SwapContext memory ctx = _decodeHookData(hookData);
 
-        // Skips sell-side fee on multihops' first-hop & limit withdrawals
+        // Skips sell-side fee on limit withdrawals & first-hop of playerToken<>playerToken swaps
         if ((sender == swapRouter || sender == swapQuoter) && ctx.skipFee) return true;
 
         return false;
