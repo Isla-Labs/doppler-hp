@@ -242,19 +242,11 @@ contract Airlock is Ownable {
 
         assetData.liquidityMigrator.migrate(sqrtPriceX96, token0, token1, assetData.timelock);
 
-        _updateMigrationStatus(asset);
+        IWhitelistRegistryAdmin(whitelistRegistry).updateMigrationStatus(asset);
 
         IFeeRouter(feeRouter).convertBondingFee(asset);
 
         emit Migrate(asset, assetData.migrationPool);
-    }
-
-    /**
-     * @dev Updates migration status of the market in WhitelistRegistry
-     * @param Address of the newly migrated token
-     */
-    function _updateMigrationStatus(address token) internal {
-        IWhitelistRegistryAdmin(whitelistRegistry).updateMigrationStatus(token);
     }
 
     /**
