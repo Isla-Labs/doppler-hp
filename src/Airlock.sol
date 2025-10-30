@@ -127,7 +127,7 @@ contract Airlock is Ownable {
     address public immutable whitelistRegistry;
     address public immutable feeRouter;
     address public immutable marketSunsetter;
-    address public immutable controller;
+    address public immutable controllerMultisig;
     
     error ZeroAddress();
 
@@ -140,7 +140,7 @@ contract Airlock is Ownable {
         address feeRouter_,
         address whitelistRegistry_,
         address marketSunsetter_,
-        address controller_,
+        address controllerMultisig_,
         address owner_
     ) Ownable(owner_) {
         if (
@@ -153,7 +153,7 @@ contract Airlock is Ownable {
         feeRouter = feeRouter_;
         whitelistRegistry = whitelistRegistry_;
         marketSunsetter = marketSunsetter_;
-        controller = controller_;
+        controllerMultisig = controllerMultisig_;
     }
 
     /**
