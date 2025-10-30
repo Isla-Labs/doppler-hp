@@ -27,7 +27,7 @@ contract NoOpMigrator is ILiquidityMigrator, ImmutableAirlock {
     }
 
     /// @inheritdoc ILiquidityMigrator
-    function migrate(uint160, address, address, address) external payable onlyAirlock returns (uint256) {
+    function migrate(uint160, address, address, address, address) external payable onlyAirlock returns (uint256) {
         revert CannotMigrate();
     }
 }

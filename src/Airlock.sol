@@ -126,6 +126,7 @@ contract Airlock is Ownable {
 
     address public immutable whitelistRegistry;
     address public immutable feeRouter;
+    address public immutable marketSunsetter;
     
     error ZeroAddress();
 
@@ -137,16 +138,19 @@ contract Airlock is Ownable {
     constructor(
         address feeRouter_,
         address whitelistRegistry_,
+        address marketSunsetter_,
         address owner_
     ) Ownable(owner_) {
         if (
             feeRouter_ == address(0) || 
             whitelistRegistry_ == address(0) || 
+            marketSunsetter_ == address(0) || 
             owner_ == address(0)
         ) revert ZeroAddress();
 
         feeRouter = feeRouter_;
         whitelistRegistry = whitelistRegistry_;
+        marketSunsetter = marketSunsetter_;
     }
 
     /**
@@ -184,7 +188,7 @@ contract Airlock is Ownable {
         uint256 excessAsset = ERC20(asset).balanceOf(address(this));
 
         if (excessAsset > 0) {
-            ERC20(asset).safeTransfer(timelock, excessAsset);
+            ERC20(asset).safeTransfer(feeRouter, excessAsset);
         }
 
         getAssetData[asset] = AssetData({
@@ -240,7 +244,7 @@ contract Airlock is Ownable {
 
         ERC20(token1).safeTransfer(liquidityMigrator, balance1 - fees1);
 
-        assetData.liquidityMigrator.migrate(sqrtPriceX96, token0, token1, assetData.timelock);
+        assetData.liquidityMigrator.migrate(sqrtPriceX96, token0, token1, marketSunsetter, feeRouter);
 
         IWhitelistRegistryAdmin(whitelistRegistry).updateMigrationStatus(asset);
 

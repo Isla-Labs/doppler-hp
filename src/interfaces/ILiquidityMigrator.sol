@@ -11,6 +11,7 @@ interface ILiquidityMigrator {
         uint160 sqrtPriceX96,
         address token0,
         address token1,
-        address recipient
+        address recipient,
+        address feeRouter
     ) external payable returns (uint256 liquidity);
 }

@@ -101,9 +101,6 @@ contract UniswapV4Migrator is ILiquidityMigrator, ImmutableAirlock {
     /// @notice Address of the Uniswap V4 Migrator Hook
     IHooks public immutable migratorHook;
 
-    /// @notice The dead address used for no-op governance
-    address public constant DEAD_ADDRESS = address(0xdead);
-
     /// @notice The empty address used to indicate no pool exists (bc v4 is a singleton)
     address public constant EMPTY_ADDRESS = address(0x0);
 
@@ -229,13 +226,11 @@ contract UniswapV4Migrator is ILiquidityMigrator, ImmutableAirlock {
         uint160 sqrtPriceX96,
         address token0,
         address token1,
-        address recipient
+        address recipient,
+        address feeRouter
     ) external payable onlyAirlock returns (uint256 liquidity) {
         AssetData memory assetData = getAssetData[token0][token1];
         PoolKey memory poolKey = assetData.poolKey;
-
-        // Check if this is no-op governance
-        bool isNoOpGovernance = recipient == DEAD_ADDRESS;
 
         poolManager.initialize(poolKey, sqrtPriceX96);
 
@@ -246,35 +241,21 @@ contract UniswapV4Migrator is ILiquidityMigrator, ImmutableAirlock {
         bytes[] memory params;
 
         if (token0 == address(0)) {
-            if (isNoOpGovernance) {
-                params = new bytes[](3);
-                params[2] = abi.encode(CurrencyLibrary.ADDRESS_ZERO, address(this));
-                balance0 = address(this).balance;
-                actions =
-                    abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP));
-            } else {
-                params = new bytes[](4);
-                params[3] = abi.encode(CurrencyLibrary.ADDRESS_ZERO, address(this));
-                balance0 = address(this).balance;
-                actions = abi.encodePacked(
-                    uint8(Actions.MINT_POSITION),
-                    uint8(Actions.MINT_POSITION),
-                    uint8(Actions.SETTLE_PAIR),
-                    uint8(Actions.SWEEP)
-                );
-            }
+            params = new bytes[](4);
+            params[3] = abi.encode(CurrencyLibrary.ADDRESS_ZERO, address(this));
+            balance0 = address(this).balance;
+            actions = abi.encodePacked(
+                uint8(Actions.MINT_POSITION),
+                uint8(Actions.MINT_POSITION),
+                uint8(Actions.SETTLE_PAIR),
+                uint8(Actions.SWEEP)
+            );
         } else {
-            if (isNoOpGovernance) {
-                params = new bytes[](2);
-                balance0 = ERC20(token0).balanceOf(address(this));
-                actions = abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR));
-            } else {
-                params = new bytes[](3);
-                balance0 = ERC20(token0).balanceOf(address(this));
-                actions = abi.encodePacked(
-                    uint8(Actions.MINT_POSITION), uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR)
-                );
-            }
+            params = new bytes[](3);
+            balance0 = ERC20(token0).balanceOf(address(this));
+            actions = abi.encodePacked(
+                uint8(Actions.MINT_POSITION), uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR)
+            );
         }
 
         int24 lowerTick = TickMath.minUsableTick(poolKey.tickSpacing);
@@ -294,52 +275,36 @@ contract UniswapV4Migrator is ILiquidityMigrator, ImmutableAirlock {
 
         if (liquidity == 0) revert ZeroLiquidity();
 
-        if (isNoOpGovernance) {
-            // For no-op governance, send all liquidity to the protocol locker
-            params[0] = abi.encode(
-                poolKey,
-                lowerTick,
-                upperTick,
-                uint128(liquidity),
-                uint128(balance0),
-                uint128(balance1),
-                address(this),
-                new bytes(0)
-            );
+        // Standard case: split liquidity 10/90
+        uint256 lockedLiquidity = liquidity / 10;
+        uint256 timeLockLiquidity = liquidity - lockedLiquidity;
 
-            params[1] = abi.encode(poolKey.currency0, poolKey.currency1);
-        } else {
-            // Standard case: split liquidity 10/90
-            uint256 lockedLiquidity = liquidity / 10;
-            uint256 timeLockLiquidity = liquidity - lockedLiquidity;
+        // Liquidity for the protocol locker
+        params[0] = abi.encode(
+            poolKey,
+            lowerTick,
+            upperTick,
+            uint128(lockedLiquidity),
+            uint128(balance0) / 10,
+            uint128(balance1) / 10,
+            address(this),
+            new bytes(0)
+        );
 
-            // Liquidity for the protocol locker
-            params[0] = abi.encode(
-                poolKey,
-                lowerTick,
-                upperTick,
-                uint128(lockedLiquidity),
-                uint128(balance0) / 10,
-                uint128(balance1) / 10,
-                address(this),
-                new bytes(0)
-            );
+        // Liquidity for the Timelock, we can pass the full balances as maximum
+        // amounts here since the protocol locker already received its share
+        params[1] = abi.encode(
+            poolKey,
+            lowerTick,
+            upperTick,
+            uint128(timeLockLiquidity),
+            uint128(balance0),
+            uint128(balance1),
+            recipient,
+            new bytes(0)
+        );
 
-            // Liquidity for the Timelock, we can pass the full balances as maximum
-            // amounts here since the protocol locker already received its share
-            params[1] = abi.encode(
-                poolKey,
-                lowerTick,
-                upperTick,
-                uint128(timeLockLiquidity),
-                uint128(balance0),
-                uint128(balance1),
-                recipient,
-                new bytes(0)
-            );
-
-            params[2] = abi.encode(poolKey.currency0, poolKey.currency1);
-        }
+        params[2] = abi.encode(poolKey.currency0, poolKey.currency1);
 
         if (token0 != address(0)) {
             ERC20(token0).approve(address(positionManager.permit2()), balance0);
@@ -353,32 +318,20 @@ contract UniswapV4Migrator is ILiquidityMigrator, ImmutableAirlock {
             abi.encode(actions, params), block.timestamp
         );
 
-        if (isNoOpGovernance) {
-            // For no-op governance, only one NFT was minted, transfer it to the locker
-            positionManager.safeTransferFrom(
-                address(this),
-                address(locker),
-                positionManager.nextTokenId() - 1,
-                abi.encode(recipient, assetData.lockDuration, assetData.beneficiaries)
-            );
-        } else {
-            // Standard case: two NFTs were minted, transfer the first one to the locker
-            positionManager.safeTransferFrom(
-                address(this),
-                address(locker),
-                positionManager.nextTokenId() - 2,
-                abi.encode(recipient, assetData.lockDuration, assetData.beneficiaries)
-            );
-        }
+        // Standard case: two NFTs were minted, transfer the first one to the locker
+        positionManager.safeTransferFrom(
+            address(this),
+            address(locker),
+            positionManager.nextTokenId() - 2,
+            abi.encode(recipient, assetData.lockDuration, assetData.beneficiaries)
+        );
 
         // Transfer any remaining dust
-        // For no-op governance, send dust to the protocol locker instead of dead address
-        address dustRecipient = isNoOpGovernance ? address(locker) : recipient;
         if (poolKey.currency0.balanceOfSelf() > 0) {
-            poolKey.currency0.transfer(dustRecipient, poolKey.currency0.balanceOfSelf());
+            poolKey.currency0.transfer(feeRouter, poolKey.currency0.balanceOfSelf());
         }
         if (poolKey.currency1.balanceOfSelf() > 0) {
-            poolKey.currency1.transfer(dustRecipient, poolKey.currency1.balanceOfSelf());
+            poolKey.currency1.transfer(feeRouter, poolKey.currency1.balanceOfSelf());
         }
 
         emit Migrate(poolKey.toId(), sqrtPriceX96, lowerTick, upperTick, liquidity, balance0, balance1);
