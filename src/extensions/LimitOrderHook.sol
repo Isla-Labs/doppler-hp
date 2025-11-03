@@ -3,18 +3,17 @@
 
 pragma solidity ^0.8.26;
 
-// External imports
-import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
-import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
-import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {Hooks} from "@oz-v4-core/libraries/Hooks.sol";
+import {FullMath} from "@oz-v4-core/libraries/FullMath.sol";
+import {StateLibrary} from "@oz-v4-core/libraries/StateLibrary.sol";
+import {TickMath} from "@oz-v4-core/libraries/TickMath.sol";
+import {PoolKey} from "@oz-v4-core/types/PoolKey.sol";
+import {Currency} from "@oz-v4-core/types/Currency.sol";
+import {PoolId} from "@oz-v4-core/types/PoolId.sol";
+import {BalanceDelta} from "@oz-v4-core/types/BalanceDelta.sol";
+import {IPoolManager} from "@oz-v4-core/interfaces/IPoolManager.sol";
+import {IUnlockCallback} from "@oz-v4-core/interfaces/callback/IUnlockCallback.sol";
+import {SwapParams, ModifyLiquidityParams} from "@oz-v4-core/types/PoolOperation.sol";
 import {CurrencySettler} from "@oz-hooks/utils/CurrencySettler.sol";
 import {BaseHook} from "@oz-hooks/base/BaseHook.sol";
 

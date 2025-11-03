@@ -2,14 +2,13 @@
 pragma solidity ^0.8.26;
 
 import { LimitOrderHook, OrderIdLibrary } from "src/extensions/LimitOrderHook.sol";
-import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
-import { Hooks } from "@v4-core/libraries/Hooks.sol";
-import { PoolKey } from "@v4-core/types/PoolKey.sol";
-import { PoolId, PoolIdLibrary } from "@v4-core/types/PoolId.sol";
-import { BalanceDelta } from "@v4-core/types/BalanceDelta.sol";
-import { BeforeSwapDelta, toBeforeSwapDelta } from "@v4-core/types/BeforeSwapDelta.sol";
-import { Currency } from "@v4-core/types/Currency.sol";
-import { SwapParams } from "@v4-core/types/PoolOperation.sol";
+import { Hooks } from "@oz-v4-core/libraries/Hooks.sol";
+import { PoolKey } from "@oz-v4-core/types/PoolKey.sol";
+import { PoolId, PoolIdLibrary } from "@oz-v4-core/types/PoolId.sol";
+import { BalanceDelta } from "@oz-v4-core/types/BalanceDelta.sol";
+import { BeforeSwapDelta, toBeforeSwapDelta } from "@oz-v4-core/types/BeforeSwapDelta.sol";
+import { Currency } from "@oz-v4-core/types/Currency.sol";
+import { SwapParams } from "@oz-v4-core/types/PoolOperation.sol";
 import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { SD59x18, exp, sd } from "@prb/math/src/SD59x18.sol";
 import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
@@ -102,7 +101,6 @@ contract UniswapV4MigratorHook is LimitOrderHook {
     // ------------------------------------------
 
     constructor(
-        IPoolManager manager,
         UniswapV4Migrator migrator_,
         IWhitelistRegistry whitelistRegistry_,
         address swapQuoter_,
@@ -110,7 +108,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         address limitRouterProxy_,
         address rewardsTreasury_,
         address feeRouter_
-    ) BaseHook(manager) { 
+    ) { 
         if (
             address(migrator_) == address(0) || 
             address(whitelistRegistry_) == address(0) || 
