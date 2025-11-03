@@ -26,3 +26,6 @@
 [submodule "lib/uniswap-hooks"]
 	path = lib/uniswap-hooks
 	url = https://github.com/OpenZeppelin/uniswap-hooks
+[submodule "lib/chainlink-evm"]
+	path = lib/chainlink-evm
+	url = https://github.com/smartcontractkit/chainlink-evm
