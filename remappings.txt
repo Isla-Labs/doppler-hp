@@ -27,5 +27,6 @@ test:@openzeppelin/=lib/v4-core/lib/openzeppelin-contracts/contracts/
 @prb/math/=lib/prb-math/
 
 @oz-hooks/=lib/uniswap-hooks/src/
+@oz-v4-core/=lib/uniswap-hooks/lib/v4-core/src/
 @uniswap/v4-core/=lib/v4-periphery/lib/v4-core/
 @uniswap/v4-periphery/=lib/v4-periphery/
