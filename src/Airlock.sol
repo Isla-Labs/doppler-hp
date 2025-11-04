@@ -130,6 +130,8 @@ contract Airlock is Ownable {
     address public immutable controllerMultisig;
     
     error ZeroAddress();
+    error AlreadySet();
+    error FeeRouter();
 
     receive() external payable { }
 
@@ -137,20 +139,17 @@ contract Airlock is Ownable {
      * @param owner_ Address receiving the ownership of the Airlock contract
      */
     constructor(
-        address feeRouter_,
         address whitelistRegistry_,
         address marketSunsetter_,
         address controllerMultisig_,
         address owner_
     ) Ownable(owner_) {
         if (
-            feeRouter_ == address(0) || 
             whitelistRegistry_ == address(0) || 
             marketSunsetter_ == address(0) || 
             owner_ == address(0)
         ) revert ZeroAddress();
 
-        feeRouter = feeRouter_;
         whitelistRegistry = whitelistRegistry_;
         marketSunsetter = marketSunsetter_;
         controllerMultisig = controllerMultisig_;
@@ -172,6 +171,8 @@ contract Airlock is Ownable {
         _validateModuleState(address(createData.governanceFactory), ModuleState.GovernanceFactory);
         _validateModuleState(address(createData.poolInitializer), ModuleState.PoolInitializer);
         _validateModuleState(address(createData.liquidityMigrator), ModuleState.LiquidityMigrator);
+
+        if (feeRouter == address(0)) revert FeeRouter();
 
         asset = createData.tokenFactory.create(
             createData.initialSupply, address(this), address(this), createData.salt, createData.tokenFactoryData
@@ -219,6 +220,8 @@ contract Airlock is Ownable {
     function migrate(
         address asset
     ) external onlyOwner {
+        if (feeRouter == address(0)) revert FeeRouter();
+        
         AssetData memory assetData = getAssetData[asset];
 
         DERC20(asset).unlockPool();
@@ -343,5 +346,16 @@ contract Airlock is Ownable {
      */
     function _validateModuleState(address module, ModuleState state) internal view {
         require(getModuleState[address(module)] == state, WrongModuleState(module, state, getModuleState[module]));
+    }
+
+    /**
+     * @dev Sets feeRouter variable during deployment flow
+     * @param newFeeRouter Address of the feeRouter contract
+     */
+    function setFeeRouter(address newFeeRouter) external onlyOwner {
+        if (feeRouter != address(0)) revert AlreadySet();
+
+        if (newFeeRouter == address(0)) revert ZeroAddress();
+        feeRouter = newFeeRouter;
     }
 }
