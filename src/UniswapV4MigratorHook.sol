@@ -149,7 +149,7 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         PoolKey calldata,
         uint160
     ) internal view override onlyMigrator(sender) returns (bytes4) {
-        return BaseHook.beforeInitialize.selector;
+        return this.beforeInitialize.selector;
     }
 
     /// @notice Hook that runs before swap
@@ -164,16 +164,16 @@ contract UniswapV4MigratorHook is LimitOrderHook {
             if (!whitelistRegistry.isMarketActive(Currency.unwrap(key.currency1))) revert MarketSunset();
 
             if (swapParams.amountSpecified < 0) {
-                return (BaseHook.beforeSwap.selector, toBeforeSwapDelta(0, 0), 0);
+                return (this.beforeSwap.selector, toBeforeSwapDelta(0, 0), 0);
             }
 
             uint256 feeEth = _takeEthFee(key, uint256(swapParams.amountSpecified));
             if (feeEth > 0) {
-                return (BaseHook.beforeSwap.selector, toBeforeSwapDelta(feeEth.toInt128(), 0), 0);
+                return (this.beforeSwap.selector, toBeforeSwapDelta(feeEth.toInt128(), 0), 0);
             }
         }
 
-        return (BaseHook.beforeSwap.selector, toBeforeSwapDelta(0, 0), 0);
+        return (this.beforeSwap.selector, toBeforeSwapDelta(0, 0), 0);
     }
 
     /// @notice Hook that runs after swap
@@ -194,18 +194,18 @@ contract UniswapV4MigratorHook is LimitOrderHook {
         // Dynamic fee on exact-output buys (ETH -> playerToken)
         if (swapParams.zeroForOne && swapParams.amountSpecified < 0) {
             uint256 feeEth = _takeEthFee(key, _absDelta0(delta));
-            if (feeEth > 0) return (BaseHook.afterSwap.selector, feeEth.toInt128());
+            if (feeEth > 0) return (this.afterSwap.selector, feeEth.toInt128());
         }
 
         // Dynamic fee on sells (playerToken -> ETH)
         if (!swapParams.zeroForOne) {
-            if (_shouldSkipFee(sender, key, hookData)) return (BaseHook.afterSwap.selector, 0);
+            if (_shouldSkipFee(sender, key, hookData)) return (this.afterSwap.selector, 0);
 
             uint256 feeEth = _takeEthFee(key, _absDelta0(delta));
-            if (feeEth > 0) return (BaseHook.afterSwap.selector, feeEth.toInt128());
+            if (feeEth > 0) return (this.afterSwap.selector, feeEth.toInt128());
         }
         
-        return (BaseHook.afterSwap.selector, 0);
+        return (this.afterSwap.selector, 0);
     }
 
     // ------------------------------------------

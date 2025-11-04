@@ -80,8 +80,6 @@ contract WhitelistRegistry is Initializable {
     }
 
     function initialize(address airlock_, address airlockMultisig_, address marketSunsetter_) external initializer {
-        if (msg.sender != invoker) revert NotAllowed();
-
         if (
             airlock_ == address(0) || 
             airlockMultisig_ == address(0) || 
