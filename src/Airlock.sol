@@ -125,9 +125,9 @@ contract Airlock is Ownable {
     mapping(address integrator => mapping(address token => uint256 amount)) public getIntegratorFees;
 
     address public immutable whitelistRegistry;
-    address public immutable feeRouter;
     address public immutable marketSunsetter;
     address public immutable controllerMultisig;
+    address public feeRouter;
     
     error ZeroAddress();
     error AlreadySet();
