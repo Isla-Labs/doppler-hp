@@ -9,9 +9,7 @@ import { Airlock } from "src/Airlock.sol";
 import { IPoolManager, IHooks } from "@v4-core/interfaces/IPoolManager.sol";
 import { IPositionManager, PositionManager } from "@v4-periphery/PositionManager.sol";
 import { MineV4MigratorHookParams, mineV4MigratorHook } from "test/shared/AirlockMiner.sol";
-import { TreasuryManager } from "src/TreasuryManager.sol";
 import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
-import { ITreasuryManager } from "src/interfaces/ITreasuryManager.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
 
 struct ScriptData {
@@ -44,13 +42,6 @@ abstract contract DeployV4MigratorScript is Script {
         // Deploy WhitelistRegistry
         WhitelistRegistry whitelistRegistry = new WhitelistRegistry(msg.sender);
 
-        // Deploy TreasuryManager
-        TreasuryManager treasuryManager = new TreasuryManager(
-            msg.sender,
-            _scriptData.platformTreasury,
-            _scriptData.rewardsTreasury
-        );
-
         // Using `CREATE` we can pre-compute the UniswapV4Migrator address for mining the hook address
         address precomputedUniswapV4Migrator = vm.computeCreateAddress(msg.sender, vm.getNonce(msg.sender));
 
@@ -59,7 +50,6 @@ abstract contract DeployV4MigratorScript is Script {
             MineV4MigratorHookParams({
                 poolManager: _scriptData.poolManager,
                 migrator: precomputedUniswapV4Migrator,
-                treasuryManager: address(treasuryManager),
                 whitelistRegistry: address(whitelistRegistry),
                 hookDeployer: _scriptData.create2Factory
             })
@@ -78,7 +68,6 @@ abstract contract DeployV4MigratorScript is Script {
         UniswapV4MigratorHook migratorHook = new UniswapV4MigratorHook{ salt: salt }(
             IPoolManager(_scriptData.poolManager), 
             uniswapV4Migrator,
-            ITreasuryManager(address(treasuryManager)),
             IWhitelistRegistry(address(whitelistRegistry))
         );
 
