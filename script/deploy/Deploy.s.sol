@@ -139,10 +139,10 @@ abstract contract DeployScript is Script {
         // ---------- Proxy scaffolding (guarded placeholders) ----------
         InitGuard guard = new InitGuard();
 
-        registryProxy     = new TransparentUpgradeableProxy(address(guard), scriptData.orchestratorProxy, hex"");
-        limitRouterProxy  = new TransparentUpgradeableProxy(address(guard), scriptData.orchestratorProxy, hex"");
-        swapRouterProxy   = new TransparentUpgradeableProxy(address(guard), scriptData.orchestratorProxy, hex"");
-        swapQuoterProxy   = new TransparentUpgradeableProxy(address(guard), scriptData.orchestratorProxy, hex"");
+        registryProxy     = new TransparentUpgradeableProxy(address(guard), msg.sender, hex"");
+        limitRouterProxy  = new TransparentUpgradeableProxy(address(guard), msg.sender, hex"");
+        swapRouterProxy   = new TransparentUpgradeableProxy(address(guard), msg.sender, hex"");
+        swapQuoterProxy   = new TransparentUpgradeableProxy(address(guard), msg.sender, hex"");
 
         // Cast proxy addresses to types for convenience (impl will be upgraded later)
         whitelistRegistry = WhitelistRegistry(address(registryProxy));
@@ -367,6 +367,23 @@ abstract contract DeployScript is Script {
         }
 
         // ---------- Handover ----------
+
+        {
+            address admin;
+
+            admin = _proxyAdminOf(address(registryProxy));
+            ProxyAdmin(payable(admin)).transferOwnership(scriptData.orchestratorProxy);
+
+            admin = _proxyAdminOf(address(limitRouterProxy));
+            ProxyAdmin(payable(admin)).transferOwnership(scriptData.orchestratorProxy);
+
+            admin = _proxyAdminOf(address(swapRouterProxy));
+            ProxyAdmin(payable(admin)).transferOwnership(scriptData.orchestratorProxy);
+
+            admin = _proxyAdminOf(address(swapQuoterProxy));
+            ProxyAdmin(payable(admin)).transferOwnership(scriptData.orchestratorProxy);
+        }
+
         airlock.transferOwnership(address(airlockMultisig));
     }
 
