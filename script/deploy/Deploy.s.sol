@@ -31,8 +31,11 @@ import { LockableUniswapV3Initializer } from "src/LockableUniswapV3Initializer.s
 import { NoOpGovernanceFactory } from "src/NoOpGovernanceFactory.sol";
 import { NoOpMigrator } from "src/NoOpMigrator.sol";
 
-import { ProxyAdmin } from "@openzeppelin/proxy/transparent/ProxyAdmin.sol";
-import { TransparentUpgradeableProxy } from "@openzeppelin/proxy/transparent/TransparentUpgradeableProxy.sol";
+import { 
+    TransparentUpgradeableProxy, 
+    ITransparentUpgradeableProxy 
+} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import { ProxyAdmin } from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 
 import { AirlockMultisig } from "src/AirlockMultisig.sol";
 import { WhitelistRegistry } from "src/WhitelistRegistry.sol";
@@ -90,7 +93,6 @@ abstract contract DeployScript is Script {
             UniswapV4MigratorHook migratorHook,
             WhitelistRegistry whitelistRegistry,
             FeeRouter feeRouter,
-            ProxyAdmin proxyAdmin,
             TransparentUpgradeableProxy registryProxy,
             TransparentUpgradeableProxy limitRouterProxy,
             TransparentUpgradeableProxy swapRouterProxy,
@@ -121,7 +123,6 @@ abstract contract DeployScript is Script {
             UniswapV4MigratorHook migratorHook,
             WhitelistRegistry whitelistRegistry,
             FeeRouter feeRouter,
-            ProxyAdmin proxyAdmin,
             TransparentUpgradeableProxy registryProxy,
             TransparentUpgradeableProxy limitRouterProxy,
             TransparentUpgradeableProxy swapRouterProxy,
@@ -137,12 +138,11 @@ abstract contract DeployScript is Script {
 
         // ---------- Proxy scaffolding (guarded placeholders) ----------
         InitGuard guard = new InitGuard();
-        proxyAdmin = new ProxyAdmin();
 
-        registryProxy = new TransparentUpgradeableProxy(address(guard), address(proxyAdmin), hex"");
-        limitRouterProxy = new TransparentUpgradeableProxy(address(guard), address(proxyAdmin), hex"");
-        swapRouterProxy = new TransparentUpgradeableProxy(address(guard), address(proxyAdmin), hex"");
-        swapQuoterProxy = new TransparentUpgradeableProxy(address(guard), address(proxyAdmin), hex"");
+        registryProxy     = new TransparentUpgradeableProxy(address(guard), scriptData.orchestratorProxy, hex"");
+        limitRouterProxy  = new TransparentUpgradeableProxy(address(guard), scriptData.orchestratorProxy, hex"");
+        swapRouterProxy   = new TransparentUpgradeableProxy(address(guard), scriptData.orchestratorProxy, hex"");
+        swapQuoterProxy   = new TransparentUpgradeableProxy(address(guard), scriptData.orchestratorProxy, hex"");
 
         // Cast proxy addresses to types for convenience (impl will be upgraded later)
         whitelistRegistry = WhitelistRegistry(address(registryProxy));
@@ -156,7 +156,7 @@ abstract contract DeployScript is Script {
         MarketSunsetterV0 msImpl = new MarketSunsetterV0();
         TransparentUpgradeableProxy marketSunsetterProxy = new TransparentUpgradeableProxy(
             address(msImpl),
-            address(proxyAdmin),
+            scriptData.orchestratorProxy,
             abi.encodeCall(MarketSunsetterV0.initialize, ())
         );
 
@@ -269,14 +269,24 @@ abstract contract DeployScript is Script {
                 WhitelistRegistry.initialize,
                 (address(airlock), address(airlockMultisig), address(marketSunsetterProxy))
             );
-            proxyAdmin.upgradeAndCall(TransparentUpgradeableProxy(payable(address(registryProxy))), address(impl), initData);
+            address admin = _proxyAdminOf(address(registryProxy));
+            ProxyAdmin(payable(admin)).upgradeAndCall(
+                ITransparentUpgradeableProxy(payable(address(registryProxy))),
+                address(impl),
+                initData
+            );
         }
 
         // HPLimitRouter
         {
             HPLimitRouter limImpl = new HPLimitRouter();
             bytes memory initData = abi.encodeCall(HPLimitRouter.initialize, ());
-            proxyAdmin.upgradeAndCall(TransparentUpgradeableProxy(payable(address(limitRouterProxy))), address(limImpl), initData);
+            address admin = _proxyAdminOf(address(limitRouterProxy));
+            ProxyAdmin(payable(admin)).upgradeAndCall(
+                ITransparentUpgradeableProxy(payable(address(limitRouterProxy))),
+                address(limImpl),
+                initData
+            );
         }
 
         // HPSwapRouter
@@ -293,7 +303,12 @@ abstract contract DeployScript is Script {
                     scriptData.ethUsdcPoolId
                 )
             );
-            proxyAdmin.upgradeAndCall(TransparentUpgradeableProxy(payable(address(swapRouterProxy))), address(swapImpl), initData);
+            address admin = _proxyAdminOf(address(swapRouterProxy));
+            ProxyAdmin(payable(admin)).upgradeAndCall(
+                ITransparentUpgradeableProxy(payable(address(swapRouterProxy))),
+                address(swapImpl),
+                initData
+            );
         }
 
         // HPSwapQuoter
@@ -304,13 +319,18 @@ abstract contract DeployScript is Script {
                 (
                     IPoolManager(scriptData.poolManager),
                     IWhitelistRegistry(address(registryProxy)),
-                    IV4Quoter(scriptData.quoterV2),         // V4Quoter address (naming kept)
+                    IV4Quoter(scriptData.quoterV2),
                     scriptData.orchestratorProxy,
                     scriptData.positionManager,
                     scriptData.ethUsdcPoolId
                 )
             );
-            proxyAdmin.upgradeAndCall(TransparentUpgradeableProxy(payable(address(swapQuoterProxy))), address(quoterImpl), initData);
+            address admin = _proxyAdminOf(address(swapQuoterProxy));
+            ProxyAdmin(payable(admin)).upgradeAndCall(
+                ITransparentUpgradeableProxy(payable(address(swapQuoterProxy))),
+                address(quoterImpl),
+                initData
+            );
         }
 
         // Verify hook linkage
@@ -348,6 +368,12 @@ abstract contract DeployScript is Script {
 
         // ---------- Handover ----------
         airlock.transferOwnership(address(airlockMultisig));
+    }
+
+    function _proxyAdminOf(address proxy) internal view returns (address admin) {
+        // EIP-1967 admin slot: bytes32(uint256(keccak256('eip1967.proxy.admin')) - 1)
+        bytes32 slot = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
+        admin = address(uint160(uint256(vm.load(proxy, slot))));
     }
 
     function _deployBundler(ScriptData memory scriptData, Airlock airlock) internal returns (Bundler bundler) {
