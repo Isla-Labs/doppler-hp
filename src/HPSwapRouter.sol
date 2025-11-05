@@ -226,7 +226,7 @@ contract HPSwapRouter is Initializable, ReentrancyGuard {
      * @param amountIn Total amount to swap in wei
      * @param minOut Slippage-adjusted minimum output in wei (minOut=0 disables slippage protection)
      * @param deadline Unix timestamp for execution deadline, e.g. block.timestamp + 600 (deadline=0 disables time bound)
-     * @return SwapResult Successful tx returns amountOut, totalGas, totalFeesEth
+     * @return res Successful tx returns amountOut, totalGas, totalFeesEth
      */
     function swap(
         address inputToken,

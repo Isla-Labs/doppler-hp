@@ -186,7 +186,7 @@ contract HPSwapQuoter is Initializable {
      * @param inputToken Address of the whitelisted token to swap from
      * @param outputToken Address of the whitelisted token to swap to
      * @param amountIn Total amount to swap in wei
-     * @return QuoteResult Successful quote returns amountOut, totalGas, totalFeesEth
+     * @return qr Successful quote returns amountOut, totalGas, totalFeesEth
      */
     function quote(
         address inputToken,
