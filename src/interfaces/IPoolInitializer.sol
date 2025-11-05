@@ -18,7 +18,8 @@ interface IPoolInitializer {
         address numeraire,
         uint256 numTokensToSell,
         bytes32 salt,
-        bytes calldata data
+        bytes calldata data,
+        address feeRouter
     ) external returns (address pool);
 
     /**

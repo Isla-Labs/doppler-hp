@@ -97,7 +97,8 @@ contract UniswapV3Initializer is IPoolInitializer, IUniswapV3MintCallback, Immut
         address numeraire,
         uint256 totalTokensOnBondingCurve,
         bytes32,
-        bytes calldata data
+        bytes calldata data,
+        address /* feeRouter */
     ) external onlyAirlock returns (address pool) {
         InitData memory initData = abi.decode(data, (InitData));
         (uint24 fee, int24 tickLower, int24 tickUpper, uint16 numPositions, uint256 maxShareToBeSold) =

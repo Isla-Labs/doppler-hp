@@ -101,7 +101,8 @@ contract CustomLPUniswapV2Migrator is ICustomLPUniswapV2Migrator, ImmutableAirlo
         uint160 sqrtPriceX96,
         address token0,
         address token1,
-        address recipient
+        address recipient,
+        address /* feeRouter */
     ) external payable onlyAirlock returns (uint256 liquidity) {
         uint256 balance0;
         uint256 balance1 = ERC20(token1).balanceOf(address(this));

@@ -60,7 +60,8 @@ contract UniswapV2Migrator is ILiquidityMigrator, ImmutableAirlock {
         uint160 sqrtPriceX96,
         address token0,
         address token1,
-        address recipient
+        address recipient,
+        address /* feeRouter */
     ) external payable onlyAirlock returns (uint256 liquidity) {
         return _migrate(sqrtPriceX96, token0, token1, recipient);
     }
