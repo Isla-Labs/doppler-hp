@@ -52,8 +52,11 @@ uint256 constant DEFAULT_PD_SLUGS = 3;
 /// @dev Test contract allowing us to set some specific state
 contract AirlockCheat is Airlock {
     constructor(
+        address whitelistRegistry_,
+        address marketSunsetter_,
+        address controllerMultisig_,
         address owner_
-    ) Airlock(owner_) { }
+    ) Airlock(whitelistRegistry_, marketSunsetter_, controllerMultisig_, owner_) { }
 
     function setProtocolFees(address token, uint256 amount) public {
         getProtocolFees[token] = amount;
@@ -69,15 +72,18 @@ contract AirlockCheat is Airlock {
 }
 
 contract MockLiquidityMigrator is ILiquidityMigrator {
-    function initialize(address, address, bytes calldata) external override returns (address) { }
+    function initialize(address, address, bytes calldata) external override returns (address) {
+        return address(0);
+    }
 
     function migrate(
         uint160 sqrtPriceX96,
         address token0,
         address token1,
-        address timelock
+        address recipient,
+        address feeRouter
     ) external payable override returns (uint256) {
-        // Do nothing
+        return 0;
     }
 }
 
@@ -96,7 +102,11 @@ contract AirlockTest is Test, Deployers {
 
         deployFreshManager();
 
-        airlock = new AirlockCheat(address(this));
+        address whitelistRegistry = makeAddr("WhitelistRegistry");
+        address marketSunsetter = makeAddr("MarketSunsetter");
+        address controller = makeAddr("Controller");
+        airlock = new AirlockCheat(whitelistRegistry, marketSunsetter, controller, address(this));
+        airlock.setFeeRouter(address(0xf33));
         tokenFactory = new TokenFactory(address(airlock));
         deployer = new DopplerDeployer(manager);
         uniswapV4Initializer = new UniswapV4Initializer(address(airlock), manager, deployer);
@@ -278,7 +288,7 @@ contract AirlockTest is Test, Deployers {
         vm.expectCall(asset, abi.encodeWithSelector(Ownable.transferOwnership.selector, timelock));
         vm.expectCall(
             liquidityMigrator,
-            abi.encodeWithSelector(ILiquidityMigrator.migrate.selector, sqrtPriceX96, token0, token1, timelock)
+            abi.encodeWithSelector(ILiquidityMigrator.migrate.selector, sqrtPriceX96, token0, token1, timelock, airlock.feeRouter())
         );
 
         vm.mockCall(asset, abi.encodeWithSelector(DERC20.unlockPool.selector), new bytes(0));
@@ -302,6 +312,7 @@ contract AirlockTest is Test, Deployers {
 
         vm.expectEmit();
         emit Migrate(asset, migrationPool);
+        vm.mockCall(address(airlock.whitelistRegistry()), abi.encodeWithSignature("updateMigrationStatus(address)", asset), new bytes(0));
         airlock.migrate(asset);
     }
 
