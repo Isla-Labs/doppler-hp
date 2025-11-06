@@ -34,7 +34,8 @@ contract DopplerDeployer {
             int24 gamma,
             bool isToken0,
             uint256 numPDSlugs,
-            uint24 lpFee
+            uint24 lpFee,
+            int24 tickSpacing
         ) = abi.decode(
             data, (uint256, uint256, uint256, uint256, int24, int24, uint256, int24, bool, uint256, uint24, int24)
         );
@@ -94,8 +95,22 @@ contract UniswapV4Initializer is IPoolInitializer, ImmutableAirlock {
         bytes calldata data,
         address feeRouter_
     ) external onlyAirlock returns (address) {
-        (,,,, int24 startingTick,,,, bool isToken0,,, int24 tickSpacing) =
-            abi.decode(data, (uint256, uint256, uint256, uint256, int24, int24, uint256, int24, bool, uint256, uint24, int24));
+        (
+            uint256 _minimumProceeds,
+            uint256 _maximumProceeds,
+            uint256 _startingTime,
+            uint256 _endingTime,
+            int24 startingTick,
+            int24 _endingTick,
+            uint256 _epochLength,
+            int24 _gamma,
+            bool isToken0,
+            uint256 _numPDSlugs,
+            uint24 _lpFee,
+            int24 tickSpacing
+        ) = abi.decode(
+            data, (uint256, uint256, uint256, uint256, int24, int24, uint256, int24, bool, uint256, uint24, int24)
+        );
 
         Doppler doppler = deployer.deploy(numTokensToSell, salt, data);
 
