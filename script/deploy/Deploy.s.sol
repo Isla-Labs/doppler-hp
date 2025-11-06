@@ -165,8 +165,7 @@ abstract contract DeployScript is Script {
         console.log(unicode"👑 Protocol owner set as %s", scriptData.protocolOwner);
 
         airlock = new Airlock(
-            address(0),                                 // feeRouter (set later)
-            address(registryProxy),                     // whitelistRegistry proxy
+            address(registryProxy),                     // whitelistRegistry
             address(marketSunsetterProxy),              // marketSunsetter
             scriptData.hpController,                    // controllerMultisig
             msg.sender                                  // owner
