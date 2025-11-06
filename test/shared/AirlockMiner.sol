@@ -9,7 +9,6 @@ import { UniswapV4Initializer } from "src/UniswapV4Initializer.sol";
 import { DERC20 } from "src/DERC20.sol";
 import { Doppler } from "src/Doppler.sol";
 import { Airlock } from "src/Airlock.sol";
-import { UniswapV4Initializer } from "src/UniswapV4Initializer.sol";
 import { UniswapV4MigratorHook } from "src/UniswapV4MigratorHook.sol";
 
 // mask to slice out the bottom 14 bit of the address
@@ -44,11 +43,14 @@ struct MineV4Params {
 }
 
 struct MineV4MigratorHookParams {
-    address poolManager;
     address migrator;
-    address hookDeployer;
-    address treasuryManager;
     address whitelistRegistry;
+    address swapQuoter;
+    address swapRouter;
+    address limitRouter;
+    address rewardsTreasury;
+    address feeRouter;
+    address hookDeployer;
 }
 
 function mineV4MigratorHook(
@@ -56,12 +58,15 @@ function mineV4MigratorHook(
 ) view returns (bytes32, address) {
     bytes32 migratorHookInitHash = keccak256(
         abi.encodePacked(
-            type(UniswapV4MigratorHook).creationCode, 
+            type(UniswapV4MigratorHook).creationCode,
             abi.encode(
-                params.poolManager, 
                 params.migrator,
-                params.treasuryManager,
-                params.whitelistRegistry
+                params.whitelistRegistry,
+                params.swapQuoter,
+                params.swapRouter,
+                params.limitRouter,
+                params.rewardsTreasury,
+                params.feeRouter
             )
         )
     );
