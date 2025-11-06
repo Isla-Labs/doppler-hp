@@ -210,7 +210,7 @@ abstract contract DeployScript is Script {
                 whitelistRegistry: address(registryProxy),
                 swapQuoter: address(swapQuoterProxy),
                 swapRouter: address(swapRouterProxy),
-                limitRouterProxy: address(limitRouterProxy),
+                limitRouter: address(limitRouterProxy),
                 rewardsTreasury: scriptData.rewardsTreasury,
                 feeRouter: address(feeRouter)
             })
