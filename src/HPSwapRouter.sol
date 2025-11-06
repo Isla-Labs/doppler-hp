@@ -10,6 +10,7 @@ import { IHooks } from "@v4-core/interfaces/IHooks.sol";
 import { PoolKey } from "@v4-core/types/PoolKey.sol";
 import { Currency } from "@v4-core/types/Currency.sol";
 import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
+import { TransientStateLibrary } from "@v4-core/libraries/TransientStateLibrary.sol";
 import { IDopplerHook, IMigratorHook } from "src/interfaces/IHookSelector.sol";
 import { IWETH, IPermit2, IPositionManager } from "src/interfaces/IUtilities.sol";
 import { IWhitelistRegistry } from "src/interfaces/IWhitelistRegistry.sol";
@@ -31,6 +32,7 @@ struct SwapResult {
 contract HPSwapRouter is Initializable, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using SafeCastLib for uint256;
+    using TransientStateLibrary for IPoolManager;
     
     IPoolManager public poolManager;
     address public positionManager;
