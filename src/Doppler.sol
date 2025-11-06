@@ -1307,11 +1307,7 @@ contract Doppler is BaseHook {
 
         if (token == address(0)) {
             // call feeRouter.forwardBondingFee(market) with value = amt
-            assembly {
-                mstore(0x00, FORWARD_BONDING_FEE_SELECTOR)
-                mstore(0x04, shl(96, market))      // abi-encode address
-                ok := call(gas(), to, amt, 0x00, 0x24, 0, 0)
-            }
+            (ok, ) = to.call{ value: amt }(abi.encodeWithSelector(FORWARD_BONDING_FEE_SELECTOR, market));
         } else {
             assembly {
                 mstore(0x00, ERC20_TRANSFER_SELECTOR)
