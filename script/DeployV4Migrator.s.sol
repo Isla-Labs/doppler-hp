@@ -40,7 +40,7 @@ abstract contract DeployV4MigratorScript is Script {
         );
 
         // Deploy WhitelistRegistry
-        WhitelistRegistry whitelistRegistry = new WhitelistRegistry(msg.sender);
+        WhitelistRegistry whitelistRegistry = new WhitelistRegistry(); // WRONG: Now a proxy
 
         // Using `CREATE` we can pre-compute the UniswapV4Migrator address for mining the hook address
         address precomputedUniswapV4Migrator = vm.computeCreateAddress(msg.sender, vm.getNonce(msg.sender));
@@ -48,9 +48,13 @@ abstract contract DeployV4MigratorScript is Script {
         /// Mine salt for migrator hook address
         (bytes32 salt, address minedMigratorHook) = mineV4MigratorHook(
             MineV4MigratorHookParams({
-                poolManager: _scriptData.poolManager,
                 migrator: precomputedUniswapV4Migrator,
                 whitelistRegistry: address(whitelistRegistry),
+                swapQuoter: vm.envAddress("V4_QUOTER"),
+                swapRouter: vm.envAddress("UNIVERSAL_ROUTER"),
+                limitRouter: vm.envAddress("LIMIT_ROUTER"),
+                rewardsTreasury: _scriptData.rewardsTreasury,
+                feeRouter: vm.envAddress("FEE_ROUTER"),
                 hookDeployer: _scriptData.create2Factory
             })
         );
@@ -64,11 +68,15 @@ abstract contract DeployV4MigratorScript is Script {
             IHooks(minedMigratorHook)
         );
 
-        // Deploy hook with deployed migrator address
+        // Deploy hook with pre-mined salt (7-arg ctor)
         UniswapV4MigratorHook migratorHook = new UniswapV4MigratorHook{ salt: salt }(
-            IPoolManager(_scriptData.poolManager), 
             uniswapV4Migrator,
-            IWhitelistRegistry(address(whitelistRegistry))
+            IWhitelistRegistry(address(whitelistRegistry)),
+            vm.envAddress("V4_QUOTER"),
+            vm.envAddress("UNIVERSAL_ROUTER"),
+            vm.envAddress("LIMIT_ROUTER"),
+            _scriptData.rewardsTreasury,
+            vm.envAddress("FEE_ROUTER")
         );
 
         /// Verify that the hook was set correctly in the UniswapV4Migrator constructor
