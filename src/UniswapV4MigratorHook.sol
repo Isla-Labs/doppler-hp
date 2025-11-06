@@ -9,6 +9,8 @@ import { BalanceDelta } from "@oz-v4-core/types/BalanceDelta.sol";
 import { BeforeSwapDelta, toBeforeSwapDelta } from "@oz-v4-core/types/BeforeSwapDelta.sol";
 import { Currency } from "@oz-v4-core/types/Currency.sol";
 import { SwapParams } from "@oz-v4-core/types/PoolOperation.sol";
+import { StateLibrary } from "@oz-v4-core/libraries/StateLibrary.sol";
+import { IPoolManager } from "@oz-v4-core/interfaces/IPoolManager.sol";
 import { SafeCastLib } from "@solady/utils/SafeCastLib.sol";
 import { SD59x18, exp, sd } from "@prb/math/src/SD59x18.sol";
 import { UniswapV4Migrator } from "src/UniswapV4Migrator.sol";
@@ -27,6 +29,7 @@ import { SwapContext } from "src/stores/SwapContext.sol";
 contract UniswapV4MigratorHook is LimitOrderHook {
     using PoolIdLibrary for PoolKey;
     using SafeCastLib for uint256;
+    using StateLibrary for IPoolManager;
 
     IWhitelistRegistry public immutable whitelistRegistry;
 
