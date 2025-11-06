@@ -14,7 +14,7 @@ import {BalanceDelta} from "@oz-v4-core/types/BalanceDelta.sol";
 import {IPoolManager} from "@oz-v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "@oz-v4-core/interfaces/callback/IUnlockCallback.sol";
 import {SwapParams, ModifyLiquidityParams} from "@oz-v4-core/types/PoolOperation.sol";
-import {CurrencySettler} from "@oz-hooks/utils/CurrencySettler.sol";
+import {CurrencySettler} from "src/extensions/utils/CurrencySettler.sol";
 import {BaseHook} from "src/extensions/BaseHook.sol";
 
 /// @dev The order id library.
