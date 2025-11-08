@@ -97,7 +97,13 @@ contract DopplerFixtures is Deployers {
     function _deployAirlockAndModules() internal {
         manager = new PoolManager(address(this));
 
-        airlock = new Airlock(address(this));
+        // Airlock now requires 4 ctor args; set a dummy fee router after
+        address whitelistRegistry = makeAddr("whitelistRegistry");
+        address marketSunsetter = makeAddr("marketSunsetter");
+        address controller = makeAddr("controller");
+        airlock = new Airlock(whitelistRegistry, marketSunsetter, controller, address(this));
+        airlock.setFeeRouter(makeAddr("feeRouter"));
+
         deployer = new DopplerDeployer(manager);
         initializer = new UniswapV4Initializer(address(airlock), manager, deployer);
         tokenFactory = new TokenFactory(address(airlock));

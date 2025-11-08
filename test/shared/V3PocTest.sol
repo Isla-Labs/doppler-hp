@@ -36,7 +36,13 @@ contract V3PocTest is Test {
     function setUp() public {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), 21_093_509);
 
-        airlock = new Airlock(address(this));
+        // Airlock now requires 4 ctor args; set a dummy fee router after
+        address whitelistRegistry = makeAddr("whitelistRegistry");
+        address marketSunsetter = makeAddr("marketSunsetter");
+        address controller = makeAddr("controller");
+        airlock = new Airlock(whitelistRegistry, marketSunsetter, controller, address(this));
+        airlock.setFeeRouter(makeAddr("feeRouter"));
+
         initializer = new UniswapV3Initializer(address(airlock), IUniswapV3Factory(UNISWAP_V3_FACTORY_MAINNET));
         uniswapV2LiquidityMigrator = new UniswapV2Migrator(
             address(airlock),

@@ -30,7 +30,11 @@ abstract contract DeployV3Script is Script {
         require(_scriptData.uniswapV3Factory != address(0), "Cannot find UniswapV3Factory address!");
 
         // Airlock
-        Airlock airlock = new Airlock(msg.sender);
+        address whitelistRegistry = msg.sender;
+        address marketSunsetter = msg.sender;
+        address controller = msg.sender;
+        Airlock airlock = new Airlock(whitelistRegistry, marketSunsetter, controller, msg.sender);
+        airlock.setFeeRouter(msg.sender);
 
         // Pool Initializer modules
         UniswapV3Initializer uniswapV3Initializer =

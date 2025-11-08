@@ -17,8 +17,10 @@ contract DeployUnichainSepolia is DeployScript {
             universalRouter: 0xf70536B3bcC1bD1a972dc186A2cf84cC6da6Be5D,
             stateView: 0xc199F1072a74D4e905ABa1A84d9a45E2546B6222,
             positionManager: 0xf969Aee60879C54bAAed9F3eD26147Db216Fd664,
-            platformTreasury: 0xAa9eB4C3d3DD5F3F10DF00dE7A8D63266B497810,
-            rewardsTreasury: 0xd432a083Ecf69D57A889F4B46DF1b644Bc2a1671
+            hpController: msg.sender,
+            rewardsTreasury: 0xd432a083Ecf69D57A889F4B46DF1b644Bc2a1671,
+            orchestratorProxy: address(0),
+            ethUsdcPoolId: bytes32(0)
         });
     }
 }

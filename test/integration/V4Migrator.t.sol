@@ -48,7 +48,11 @@ contract V4MigratorTest is BaseTest, DeployPermit2 {
 
         permit2 = IAllowanceTransfer(deployPermit2());
 
-        airlock = new Airlock(address(this));
+        address whitelistRegistry = makeAddr("whitelistRegistry");
+        address marketSunsetter = makeAddr("marketSunsetter");
+        address controller = makeAddr("controller");
+        airlock = new Airlock(whitelistRegistry, marketSunsetter, controller, address(this));
+        airlock.setFeeRouter(makeAddr("feeRouter"));
         deployer = new DopplerDeployer(manager);
         initializer = new UniswapV4Initializer(address(airlock), manager, deployer);
         positionManager = Deploy.positionManager(
@@ -61,7 +65,7 @@ contract V4MigratorTest is BaseTest, DeployPermit2 {
             IPoolManager(manager),
             PositionManager(payable(address(positionManager))),
             locker,
-            IHooks(migratorHook)
+            IHooks(address(migratorHook))
         );
         deployCodeTo("UniswapV4MigratorHook", abi.encode(address(manager), address(migrator)), address(migratorHook));
         locker.approveMigrator(address(migrator));

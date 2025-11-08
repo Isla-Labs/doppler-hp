@@ -52,7 +52,11 @@ contract V4Test is Test {
     function setUp() public {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), 21_688_329);
 
-        airlock = new Airlock(address(this));
+        address whitelistRegistry = makeAddr("whitelistRegistry");
+        address marketSunsetter = makeAddr("marketSunsetter");
+        address controller = makeAddr("controller");
+        airlock = new Airlock(whitelistRegistry, marketSunsetter, controller, address(this));
+        airlock.setFeeRouter(makeAddr("feeRouter"));
         deployer = new DopplerDeployer(IPoolManager(UNISWAP_V4_POOL_MANAGER_MAINNET));
         initializer =
             new UniswapV4Initializer(address(airlock), IPoolManager(UNISWAP_V4_POOL_MANAGER_MAINNET), deployer);

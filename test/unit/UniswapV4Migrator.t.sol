@@ -71,7 +71,7 @@ contract UniswapV4MigratorTest is Test {
             IPoolManager(poolManager),
             PositionManager(positionManager),
             StreamableFeesLocker(locker),
-            IHooks(migratorHook)
+            IHooks(address(migratorHook))
         );
         deployCodeTo("UniswapV4MigratorHook", abi.encode(poolManager, migrator), address(migratorHook));
 
@@ -155,7 +155,7 @@ contract UniswapV4MigratorTest is Test {
         TestERC20(token1).mint(address(migrator), amount1);
 
         // Use DEAD_ADDRESS as recipient (simulating no-op governance)
-        address recipient = migrator.DEAD_ADDRESS();
+        address recipient = RECIPIENT;
 
         PoolKey memory poolKey = PoolKey({
             currency0: Currency.wrap(token0),
@@ -179,7 +179,7 @@ contract UniswapV4MigratorTest is Test {
 
         // Call migrate with DEAD_ADDRESS as recipient
         vm.prank(address(airlock));
-        uint256 liquidity = migrator.migrate(TickMath.MIN_SQRT_PRICE, token0, token1, recipient);
+        uint256 liquidity = migrator.migrate(TickMath.MIN_SQRT_PRICE, token0, token1, recipient, address(this));
 
         // Verify the migrator recognizes this as no-op governance
         assertTrue(liquidity > 0, "Liquidity should be greater than 0");

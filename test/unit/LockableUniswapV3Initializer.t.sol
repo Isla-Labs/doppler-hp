@@ -78,7 +78,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD,
                     beneficiaries: getDefaultBeneficiaries()
                 })
-            )
+            ),
+            address(this)
         );
 
         assertEq(token.balanceOf(address(initializer)), 0, "Wrong initializer balance");
@@ -111,7 +112,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD,
                     beneficiaries: new BeneficiaryData[](0)
                 })
-            )
+            ),
+            address(this)
         );
 
         (,,,,,, PoolStatus status) = initializer.getState(pool);
@@ -137,7 +139,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD,
                     beneficiaries: getDefaultBeneficiaries()
                 })
-            )
+            ),
+            address(this)
         );
 
         (,,,,,, PoolStatus status) = initializer.getState(pool);
@@ -163,7 +166,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD,
                     beneficiaries: new BeneficiaryData[](0)
                 })
-            )
+            ),
+            address(this)
         );
 
         vm.expectRevert(PoolAlreadyInitialized.selector);
@@ -181,14 +185,15 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD,
                     beneficiaries: new BeneficiaryData[](0)
                 })
-            )
+            ),
+            address(this)
         );
     }
 
     function test_initialize_RevertsWhenSenderNotAirlock() public {
         vm.prank(address(0xbeef));
         vm.expectRevert(SenderNotAirlock.selector);
-        initializer.initialize(address(0), address(0), 0, bytes32(0), abi.encode());
+        initializer.initialize(address(0), address(0), 0, bytes32(0), abi.encode(), address(this));
     }
 
     function test_initialize_RevertsWhenMaxShareToBeSoldExceeded() public {
@@ -211,7 +216,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: WAD + 1,
                     beneficiaries: new BeneficiaryData[](0)
                 })
-            )
+            ),
+            address(this)
         );
     }
 
@@ -237,7 +243,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: WAD,
                     beneficiaries: new BeneficiaryData[](0)
                 })
-            )
+            ),
+            address(this)
         );
     }
 
@@ -261,7 +268,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: WAD,
                     beneficiaries: new BeneficiaryData[](0)
                 })
-            )
+            ),
+            address(this)
         );
     }
 
@@ -285,7 +293,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: WAD,
                     beneficiaries: new BeneficiaryData[](0)
                 })
-            )
+            ),
+            address(this)
         );
     }
 
@@ -311,7 +320,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: WAD,
                     beneficiaries: new BeneficiaryData[](0)
                 })
-            )
+            ),
+            address(this)
         );
     }
 
@@ -347,7 +357,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD,
                     beneficiaries: beneficiaries
                 })
-            )
+            ),
+            address(this)
         );
 
         token1.approve(UNISWAP_V3_ROUTER_MAINNET, type(uint256).max);
@@ -413,7 +424,8 @@ contract LockableUniswapV3InitializerTest is Test {
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD,
                     beneficiaries: new BeneficiaryData[](0)
                 })
-            )
+            ),
+            address(this)
         );
 
         deal(address(this), 100_000_000 ether);
@@ -524,7 +536,8 @@ contract LockableUniswapV3InitializerTest is Test {
                         maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD,
                         beneficiaries: new BeneficiaryData[](0)
                     })
-                )
+                ),
+                address(this)
             )
         );
         IUniswapV3Pool notIsToken0Pool = IUniswapV3Pool(
@@ -542,7 +555,8 @@ contract LockableUniswapV3InitializerTest is Test {
                         maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD,
                         beneficiaries: new BeneficiaryData[](0)
                     })
-                )
+                ),
+                address(this)
             )
         );
 

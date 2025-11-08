@@ -59,7 +59,8 @@ contract UniswapV3InitializerTest is Test {
                     numPositions: DEFAULT_NUM_POSITIONS,
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD
                 })
-            )
+            ),
+            address(this)
         );
 
         assertEq(token.balanceOf(address(initializer)), 0, "Wrong initializer balance");
@@ -92,7 +93,8 @@ contract UniswapV3InitializerTest is Test {
                     numPositions: DEFAULT_NUM_POSITIONS,
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD
                 })
-            )
+            ),
+            address(this)
         );
 
         vm.expectRevert(PoolAlreadyInitialized.selector);
@@ -109,14 +111,15 @@ contract UniswapV3InitializerTest is Test {
                     numPositions: DEFAULT_NUM_POSITIONS,
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD
                 })
-            )
+            ),
+            address(this)
         );
     }
 
     function test_initialize_RevertsWhenSenderNotAirlock() public {
         vm.prank(address(0xbeef));
         vm.expectRevert(SenderNotAirlock.selector);
-        initializer.initialize(address(0), address(0), 0, bytes32(0), abi.encode());
+        initializer.initialize(address(0), address(0), 0, bytes32(0), abi.encode(), address(this));
     }
 
     function test_exitLiquidity() public returns (address pool) {
@@ -147,7 +150,8 @@ contract UniswapV3InitializerTest is Test {
                     numPositions: DEFAULT_NUM_POSITIONS,
                     maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD
                 })
-            )
+            ),
+            address(this)
         );
 
         deal(address(this), 100_000_000 ether);
@@ -251,7 +255,8 @@ contract UniswapV3InitializerTest is Test {
                         numPositions: DEFAULT_NUM_POSITIONS,
                         maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD
                     })
-                )
+                ),
+                address(this)
             )
         );
         IUniswapV3Pool notIsToken0Pool = IUniswapV3Pool(
@@ -268,7 +273,8 @@ contract UniswapV3InitializerTest is Test {
                         numPositions: DEFAULT_NUM_POSITIONS,
                         maxShareToBeSold: DEFAULT_MAX_SHARE_TO_BE_SOLD
                     })
-                )
+                ),
+                address(this)
             )
         );
 

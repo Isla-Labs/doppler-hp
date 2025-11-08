@@ -85,7 +85,7 @@ contract UniswapV2MigratorTest is Test {
     function test_migrate_RevertsWhenSenderNotAirlock() public {
         vm.prank(address(0xbeef));
         vm.expectRevert(SenderNotAirlock.selector);
-        migrator.migrate(uint160(0), address(0x1111), address(0x2222), address(0));
+        migrator.migrate(uint160(0), address(0x1111), address(0x2222), address(0), address(this));
     }
 
     function test_migrate() public {
@@ -96,7 +96,7 @@ contract UniswapV2MigratorTest is Test {
 
         token0.transfer(address(migrator), 1000 ether);
         token1.transfer(address(migrator), 1000 ether);
-        uint256 liquidity = migrator.migrate(uint160(2 ** 96), address(token0), address(token1), address(0xbeef));
+        uint256 liquidity = migrator.migrate(uint160(2 ** 96), address(token0), address(token1), address(0xbeef), address(this));
 
         assertEq(token0.balanceOf(address(migrator)), 0, "Wrong migrator token0 balance");
         assertEq(token1.balanceOf(address(migrator)), 0, "Wrong migrator token1 balance");
@@ -119,7 +119,7 @@ contract UniswapV2MigratorTest is Test {
 
         token0.transfer(address(migrator), 13_126_140_926_538_532_799_794);
         token1.transfer(address(migrator), 16_622_742_685_037);
-        migrator.migrate(sqrtPriceX96, address(token0), address(token1), address(0xbeef));
+        migrator.migrate(sqrtPriceX96, address(token0), address(token1), address(0xbeef), address(this));
         assertEq(token0.balanceOf(address(migrator)), 0, "Wrong migrator token0 balance");
         assertEq(token1.balanceOf(address(migrator)), 0, "Wrong migrator token1 balance");
         (uint112 reserve0, uint112 reserve1,) = IUniswapV2Pair(pool).getReserves();
@@ -142,7 +142,7 @@ contract UniswapV2MigratorTest is Test {
 
         token0.transfer(address(migrator), balance0);
         token1.transfer(address(migrator), balance1);
-        uint256 liquidity = migrator.migrate(sqrtPriceX96, address(token0), address(token1), address(0xbeef));
+        uint256 liquidity = migrator.migrate(sqrtPriceX96, address(token0), address(token1), address(0xbeef), address(this));
 
         assertEq(token0.balanceOf(address(migrator)), 0, "Wrong migrator token0 balance");
         assertEq(token1.balanceOf(address(migrator)), 0, "Wrong migrator token1 balance");
@@ -199,7 +199,7 @@ contract UniswapV2MigratorTest is Test {
         token1.transfer(address(migrator), 100 ether);
 
         uint256 nativeBalanceBefore = address(migrator).balance;
-        migrator.migrate(uint160(2 ** 96), address(0), address(token1), address(0xbeef));
+        migrator.migrate(uint160(2 ** 96), address(0), address(token1), address(0xbeef), address(this));
         assertEq(address(migrator).balance, 0, "Migrator ETH balance is wrong");
         assertEq(TestERC20(WETH_MAINNET).balanceOf(address(migrator)), 0, "Migrator WETH balance is wrong");
         assertEq(TestERC20(WETH_MAINNET).balanceOf(address(pool)), nativeBalanceBefore, "Pool WETH balance is wrong");

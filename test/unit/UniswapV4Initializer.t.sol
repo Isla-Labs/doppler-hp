@@ -60,7 +60,7 @@ contract UniswapV4InitializerTest is DopplerFixtures {
 
         vm.expectRevert(SenderNotAirlock.selector);
         vm.prank(caller);
-        initializer.initialize(asset, numeraire, numTokensToSell, salt, data);
+        initializer.initialize(asset, numeraire, numTokensToSell, salt, data, address(this));
     }
 
     function test_fuzz_exitLiquidity_revertSenderNotAirlock(address caller, address hook) public {
